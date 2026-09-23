@@ -1,0 +1,20 @@
+{
+  "name": "chainaim-router",
+  "version": "0.0.0-iter0",
+  "private": true,
+  "description": "ChainAim model gateway: one OpenAI-compatible endpoint that routes each request to the right self-hosted or API model.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.22"
+  },
+  "scripts": {
+    "gateway": "node services/gateway/src/main.ts",
+    "test": "node --test \"services/gateway/test/*.test.ts\"",
+    "test:engine": "npm --prefix packages/route-engine run check",
+    "smoke": "node scripts/smoke.ts",
+    "stub-models": "node scripts/stub-models.ts",
+    "models:start": "scripts/serve-local-models.sh",
+    "models:stop": "scripts/serve-local-models.sh --stop",
+    "eval:iter0": "node scripts/iter0-matrix.ts"
+  }
+}

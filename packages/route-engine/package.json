@@ -1,0 +1,53 @@
+{
+  "name": "@chainaim/route-engine",
+  "version": "0.1.0-chainaim.0",
+  "description": "ChainAim route engine: local, deterministic model selection. Fork of BlockRunAI/router-core (MIT).",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test && npm run build",
+    "prepublishOnly": "npm run check",
+    "probe:profiles": "node scripts/probe-model-profiles.mjs",
+    "sync:capabilities": "node scripts/sync-model-capabilities.mjs"
+  },
+  "keywords": [
+    "llm",
+    "router",
+    "llm-router",
+    "smart-router",
+    "smart-llm-router",
+    "ai-model-router",
+    "model-routing",
+    "model-selection",
+    "automatic-model-selection",
+    "routing-engine",
+    "llm-cost-optimization",
+    "blockrun"
+  ],
+  "author": "BlockRun <hello@blockrun.ai>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.3"
+  },
+  "private": true
+}

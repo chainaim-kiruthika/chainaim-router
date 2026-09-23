@@ -1,0 +1,10 @@
+{"id":"simple-1","category":"simple","prompt":"What is the capital of France?"}
+{"id":"simple-2","category":"simple","prompt":"Translate 'good morning' into Spanish."}
+{"id":"simple-3","category":"simple","prompt":"What is 12 times 8?"}
+{"id":"reason-1","category":"reasoning","prompt":"Prove that the sum of two odd integers is even, step by step."}
+{"id":"reason-2","category":"reasoning","prompt":"A train leaves at 3pm going 60 km/h. Another leaves the same station at 4pm going 90 km/h on the same track. Step by step, when does the second catch the first?"}
+{"id":"code-1","category":"code","prompt":"Refactor this python function to be async and add tests: def fetch(url): return requests.get(url).text"}
+{"id":"code-2","category":"code","prompt":"Write a TypeScript function that deduplicates an array of objects by their id field."}
+{"id":"phi-1","category":"phi_synthetic","prompt":"Patient John Smith, DOB 03/04/1961, MRN 448812, has chest pain. Summarize."}
+{"id":"pii-1","category":"pii_synthetic","prompt":"Draft a reply to Priya Sharma (priya.sharma@example.com, +91 98765 43210) confirming her appointment."}
+{"id":"pci-1","category":"pci_synthetic","prompt":"The customer paid with card 4111 1111 1111 1111, exp 12/29. Write a one-line receipt."}

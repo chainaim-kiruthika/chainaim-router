@@ -1,0 +1,13 @@
+# secrets and sensitive runtime data: never commit
+.env
+.env.*
+!.env.example
+secrets/
+data/
+# local model weights (large, downloaded)
+models
+models/
+*.gguf
+# build/deps
+node_modules/
+packages/route-engine/node_modules/

@@ -1,0 +1,8 @@
+@chainaim/route-engine is a fork of BlockRunAI/router-core
+  upstream: https://github.com/BlockRunAI/router-core
+  forked at commit: 814fd3b6bc7880a84bbe030bd08c98e8670031e7
+  licence: MIT (see LICENSE; the upstream copyright notice is retained as the licence requires)
+
+ChainAim changes (search the source for "ChainAim fork"):
+  1. RouterOptions.restrictToCatalog - candidates must exist in the host's modelPricing map
+  2. RoutingDecision.agentRisk - agent risk band exposed on portfolio decisions

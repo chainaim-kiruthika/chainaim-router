@@ -1,0 +1,50 @@
+{
+  "version": "iter0-ollama-2026-09-21",
+  "notes": "Iteration 0 catalog for Ollama on Windows. Pull the models first: `ollama pull qwen2.5:0.5b-instruct` and `ollama pull qwen2.5:1.5b-instruct`. servedModel must match the tag `ollama list` shows. Ollama serves an OpenAI-compatible API at http://localhost:11434/v1 (its docs) and ignores the API key. COLD START: Ollama sends no response headers until a model is resident, so an unloaded model looks like a hung upstream and the first request can exceed --attempt-timeout-ms and fail over (measured >120s on a cold 0.5B, <0.5s warm). No healthUrl is set because Ollama has no per-model readiness endpoint: /v1/models answers 200 whether or not anything is loaded, so the pool reads healthy during a cold-start stall. Set OLLAMA_KEEP_ALIVE=-1 to keep models resident; see README \"Cold start\". Pricing values are RELATIVE PLACEHOLDERS proportional to parameter count, not measured cost.",
+  "models": [
+    {
+      "id": "local/qwen2.5-0.5b",
+      "zone": "local",
+      "capabilities": { "contextWindow": 4096, "maxOutputTokens": 2048, "supportsTools": true, "supportsVision": false },
+      "pricing": { "inputPerM": 0.02, "outputPerM": 0.04 },
+      "deployments": [
+        { "id": "qwen-0.5b@ollama", "adapter": "openai", "baseUrl": "http://127.0.0.1:11434/v1", "servedModel": "qwen2.5:0.5b-instruct" }
+      ]
+    },
+    {
+      "id": "local/qwen2.5-1.5b",
+      "zone": "local",
+      "capabilities": { "contextWindow": 4096, "maxOutputTokens": 2048, "supportsTools": true, "supportsVision": false },
+      "pricing": { "inputPerM": 0.06, "outputPerM": 0.12 },
+      "deployments": [
+        { "id": "qwen-1.5b@ollama", "adapter": "openai", "baseUrl": "http://127.0.0.1:11434/v1", "servedModel": "qwen2.5:1.5b-instruct" }
+      ]
+    }
+  ],
+  "agentic": {
+    "SIMPLE": ["local/qwen2.5-1.5b"],
+    "MEDIUM": ["local/qwen2.5-1.5b"],
+    "COMPLEX": ["local/qwen2.5-1.5b"],
+    "REASONING": ["local/qwen2.5-1.5b"]
+  },
+  "profiles": {
+    "auto": {
+      "SIMPLE": ["local/qwen2.5-0.5b", "local/qwen2.5-1.5b"],
+      "MEDIUM": ["local/qwen2.5-1.5b", "local/qwen2.5-0.5b"],
+      "COMPLEX": ["local/qwen2.5-1.5b", "local/qwen2.5-0.5b"],
+      "REASONING": ["local/qwen2.5-1.5b", "local/qwen2.5-0.5b"]
+    },
+    "eco": {
+      "SIMPLE": ["local/qwen2.5-0.5b", "local/qwen2.5-1.5b"],
+      "MEDIUM": ["local/qwen2.5-0.5b", "local/qwen2.5-1.5b"],
+      "COMPLEX": ["local/qwen2.5-0.5b", "local/qwen2.5-1.5b"],
+      "REASONING": ["local/qwen2.5-1.5b", "local/qwen2.5-0.5b"]
+    },
+    "premium": {
+      "SIMPLE": ["local/qwen2.5-1.5b", "local/qwen2.5-0.5b"],
+      "MEDIUM": ["local/qwen2.5-1.5b", "local/qwen2.5-0.5b"],
+      "COMPLEX": ["local/qwen2.5-1.5b", "local/qwen2.5-0.5b"],
+      "REASONING": ["local/qwen2.5-1.5b", "local/qwen2.5-0.5b"]
+    }
+  }
+}
