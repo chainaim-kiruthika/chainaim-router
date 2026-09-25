@@ -13,6 +13,7 @@
     "test:engine": "npm --prefix packages/route-engine run check",
     "smoke": "node scripts/smoke.ts",
     "stub-models": "node scripts/stub-models.ts",
+    "stub-presidio": "node scripts/stub-presidio.ts",
     "models:start": "scripts/serve-local-models.sh",
     "models:stop": "scripts/serve-local-models.sh --stop",
     "eval:iter0": "node scripts/iter0-matrix.ts"
