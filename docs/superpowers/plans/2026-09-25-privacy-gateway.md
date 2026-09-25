@@ -2038,6 +2038,1452 @@ git commit -m "feat(gateway): scan and mask routes, Presidio health and privacy 
 
 ---
 
-## Parts B and C
+## Part B: paywall and deployment
 
-Part B (paywall and deployment) and Part C (private chat) are added to this file before their tasks start.
+The paywall is a separate package with its own dependencies (spec D7). Its tests run with `npm --prefix services/paywall test` (root script `test:paywall`), not with the gateway suite. Installing its dependencies takes several minutes on this network.
+
+### Task B1: Paywall package, configuration and paid routes
+
+**Files:**
+- Create: `services/paywall/package.json`
+- Create: `services/paywall/package-lock.json` (written by `npm install`)
+- Create: `services/paywall/src/config.ts`
+- Create: `services/paywall/src/routes.ts`
+- Test: `services/paywall/test/config.test.ts`
+- Modify: `package.json` (root: add the `test:paywall` script)
+
+**Interfaces:**
+- Consumes: nothing from the gateway (the paywall talks to it over HTTP only).
+- Produces:
+  - `config.ts`: `NETWORKS = { testnet: "algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=", mainnet: "algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8=" } as const`; `type NetworkName = keyof typeof NETWORKS`; `CHALLENGE_TAG = "x402-global-challenge"`; `DEFAULT_FACILITATOR = "https://facilitator.goplausible.xyz"`; `type PaywallConfig = { network: string; networkName: NetworkName; payTo: string; facilitatorUrl: string; gatewayUrl: string; gatewayKey: string; gatewayTimeoutMs: number; port: number; host: string; publicBaseUrl: string | undefined }`; `loadConfig(env: Record<string, string | undefined>): PaywallConfig` (throws an `Error` naming the bad variable).
+  - `routes.ts`: `type PaidRoute = { key: string; path: string; price: string; description: string; discovery: Record<string, unknown> }`; `PAID_ROUTES: readonly PaidRoute[]` (scan, mask, chat in that order); `type RouteEntry`; `routesConfig(config: PaywallConfig): Record<string, RouteEntry>`, each entry `{ accepts: [{ scheme: "exact", price, network, payTo, extra: { tag } }], description, mimeType: "application/json", resource?, extensions }`.
+
+- [ ] **Step 1: Create the package and install its dependencies**
+
+Create `services/paywall/package.json`:
+
+```json
+{
+  "name": "@chainaim/paywall",
+  "version": "0.1.0",
+  "private": true,
+  "description": "chainaim-paywall: x402 payments (USDC on Algorand) in front of the private chainaim-gateway.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.22"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --test --test-force-exit \"test/*.test.ts\""
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.1",
+    "@x402-avm/extensions": "2.6.1",
+    "@x402/avm": "2.27.0",
+    "@x402/core": "2.27.0",
+    "@x402/hono": "2.27.0",
+    "hono": "4.13.9"
+  }
+}
+```
+
+Run (it can take several minutes):
+
+```bash
+cd services/paywall && npm install --no-audit --no-fund
+```
+
+Expected: `added N packages`, a new `services/paywall/package-lock.json`, and `services/paywall/node_modules/`, which the root `.gitignore` rule `node_modules/` already ignores. Check with `git status --short` that no `node_modules` path is listed.
+
+In the root `package.json`, add to `"scripts"` after `"test:engine"`:
+
+```json
+    "test:paywall": "npm --prefix services/paywall test",
+```
+
+- [ ] **Step 2: Write the failing test**
+
+Create `services/paywall/test/config.test.ts`:
+
+```ts
+/**
+ * Paywall configuration and the paid-route table (spec section 9).
+ */
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { CHALLENGE_TAG, loadConfig, NETWORKS } from "../src/config.ts";
+import { PAID_ROUTES, routesConfig } from "../src/routes.ts";
+
+const PAY_TO = "IDNTKBLAMSMIBR5DV5GRRZC7PNDOGRUOSOLHZ7BIOVXJPOWT2O24BMVDPE";
+const env = { AVM_PAY_TO: PAY_TO, GATEWAY_URL: "http://gateway.railway.internal:8700", CHAINAIM_GATEWAY_KEY: "test-key" };
+
+describe("loadConfig", () => {
+  it("defaults to TestNet, the GoPlausible facilitator and port 8080", () => {
+    const c = loadConfig(env);
+    assert.equal(c.network, "algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=");
+    assert.equal(c.networkName, "testnet");
+    assert.equal(c.facilitatorUrl, "https://facilitator.goplausible.xyz");
+    assert.equal(c.port, 8080);
+    assert.equal(c.host, "0.0.0.0");
+    assert.equal(c.publicBaseUrl, undefined);
+  });
+
+  it("selects MainNet", () => {
+    assert.equal(loadConfig({ ...env, X402_NETWORK: "mainnet" }).network, "algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8=");
+  });
+
+  it("names the variable that is missing or wrong", () => {
+    assert.throws(() => loadConfig({ ...env, AVM_PAY_TO: "" }), /AVM_PAY_TO/);
+    assert.throws(() => loadConfig({ ...env, AVM_PAY_TO: "not-an-algorand-address" }), /AVM_PAY_TO/);
+    assert.throws(() => loadConfig({ ...env, GATEWAY_URL: "" }), /GATEWAY_URL/);
+    assert.throws(() => loadConfig({ ...env, GATEWAY_URL: "gateway:8700" }), /GATEWAY_URL/);
+    assert.throws(() => loadConfig({ ...env, CHAINAIM_GATEWAY_KEY: "" }), /CHAINAIM_GATEWAY_KEY/);
+    assert.throws(() => loadConfig({ ...env, X402_NETWORK: "betanet" }), /X402_NETWORK/);
+    assert.throws(() => loadConfig({ ...env, X402_NETWORK: "toString" }), /X402_NETWORK/);
+    assert.throws(() => loadConfig({ ...env, PORT: "eighty" }), /PORT/);
+  });
+
+  it("needs PUBLIC_BASE_URL to be https and strips a trailing slash", () => {
+    assert.equal(loadConfig({ ...env, PUBLIC_BASE_URL: "https://pay.example.com/" }).publicBaseUrl, "https://pay.example.com");
+    assert.throws(() => loadConfig({ ...env, PUBLIC_BASE_URL: "http://pay.example.com" }), /PUBLIC_BASE_URL/);
+  });
+});
+
+describe("paid routes", () => {
+  it("prices scan, mask and chat as the spec says", () => {
+    assert.deepEqual(
+      PAID_ROUTES.map((r) => [r.key, r.price]),
+      [["POST /v1/privacy/scan", "$0.002"], ["POST /v1/privacy/mask", "$0.003"], ["POST /v1/chat/completions", "$0.01"]],
+    );
+  });
+
+  it("puts the scheme, network, payTo and challenge tag on every accepts entry", () => {
+    const routes = routesConfig(loadConfig({ ...env, X402_NETWORK: "mainnet", PUBLIC_BASE_URL: "https://pay.example.com" }));
+    for (const r of PAID_ROUTES) {
+      const entry = routes[r.key];
+      assert.deepEqual(entry.accepts, [{ scheme: "exact", price: r.price, network: NETWORKS.mainnet, payTo: PAY_TO, extra: { tag: CHALLENGE_TAG } }]);
+      assert.equal(entry.resource, `https://pay.example.com${r.path}`);
+      assert.equal(entry.mimeType, "application/json");
+      assert.equal(entry.description, r.description);
+    }
+  });
+
+  it("leaves the resource URL to the request when PUBLIC_BASE_URL is unset", () => {
+    const routes = routesConfig(loadConfig(env));
+    for (const r of PAID_ROUTES) assert.equal("resource" in routes[r.key], false);
+  });
+
+  it("declares Bazaar discovery metadata with an input example and an output example", () => {
+    const routes = routesConfig(loadConfig(env));
+    type Info = { input: { body: Record<string, unknown> }; output: { example: unknown } };
+    const info = (key: string): Info => (routes[key].extensions as { bazaar: { info: Info } }).bazaar.info;
+    assert.deepEqual(Object.keys(info("POST /v1/privacy/scan").input.body), ["text"]);
+    assert.deepEqual(Object.keys(info("POST /v1/privacy/mask").input.body), ["text"]);
+    assert.ok(Array.isArray(info("POST /v1/chat/completions").input.body.messages));
+    for (const r of PAID_ROUTES) assert.ok(info(r.key).output.example, `${r.key} has an output example`);
+  });
+});
+```
+
+- [ ] **Step 3: Run the test to verify it fails**
+
+Run: `cd services/paywall && node --test test/config.test.ts`
+Expected: FAIL with `ERR_MODULE_NOT_FOUND` for `../src/config.ts`.
+
+- [ ] **Step 4: Write the implementation**
+
+Create `services/paywall/src/config.ts`:
+
+```ts
+/**
+ * Paywall configuration from the environment (spec sections 9 and 10). The
+ * gateway key is the only secret, and it is never logged.
+ */
+export const NETWORKS = {
+  testnet: "algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=",
+  mainnet: "algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8=",
+} as const;
+export type NetworkName = keyof typeof NETWORKS;
+
+/** Required on every accepts entry for the Global x402 Challenge (V3). */
+export const CHALLENGE_TAG = "x402-global-challenge";
+export const DEFAULT_FACILITATOR = "https://facilitator.goplausible.xyz";
+
+export type PaywallConfig = {
+  network: string;
+  networkName: NetworkName;
+  /** The one Algorand account every route pays. */
+  payTo: string;
+  facilitatorUrl: string;
+  /** The private gateway, e.g. http://gateway.railway.internal:8700 */
+  gatewayUrl: string;
+  gatewayKey: string;
+  /** How long a proxied call may take; chat can try three models. */
+  gatewayTimeoutMs: number;
+  port: number;
+  host: string;
+  /** Public origin such as https://pay.example.com: the resource URL in 402s and the Bazaar. */
+  publicBaseUrl: string | undefined;
+};
+
+export function loadConfig(env: Record<string, string | undefined>): PaywallConfig {
+  const value = (name: string): string | undefined => env[name]?.trim() || undefined;
+  const required = (name: string): string => {
+    const v = value(name);
+    if (!v) throw new Error(`${name} is required`);
+    return v;
+  };
+  const integer = (name: string, fallback: number): number => {
+    const v = value(name);
+    const n = v === undefined ? fallback : Number(v);
+    if (!Number.isInteger(n) || n < 0) throw new Error(`${name} must be a whole number, got ${v}`);
+    return n;
+  };
+
+  const networkName = value("X402_NETWORK") ?? "testnet";
+  if (!Object.hasOwn(NETWORKS, networkName)) throw new Error("X402_NETWORK must be testnet or mainnet");
+  const payTo = required("AVM_PAY_TO");
+  if (!/^[A-Z2-7]{58}$/.test(payTo)) throw new Error("AVM_PAY_TO must be a 58-character Algorand address");
+  const gatewayUrl = required("GATEWAY_URL").replace(/\/+$/, "");
+  if (!/^https?:\/\//.test(gatewayUrl) || !URL.canParse(gatewayUrl)) throw new Error("GATEWAY_URL must be an http(s) URL");
+  const publicBaseUrl = value("PUBLIC_BASE_URL")?.replace(/\/+$/, "");
+  if (publicBaseUrl !== undefined && (!publicBaseUrl.startsWith("https://") || !URL.canParse(publicBaseUrl))) {
+    throw new Error("PUBLIC_BASE_URL must be an https URL");
+  }
+  return {
+    network: NETWORKS[networkName as NetworkName],
+    networkName: networkName as NetworkName,
+    payTo,
+    facilitatorUrl: (value("FACILITATOR_URL") ?? DEFAULT_FACILITATOR).replace(/\/+$/, ""),
+    gatewayUrl,
+    gatewayKey: required("CHAINAIM_GATEWAY_KEY"),
+    gatewayTimeoutMs: integer("GATEWAY_TIMEOUT_MS", 200_000),
+    port: integer("PORT", 8080),
+    host: value("HOST") ?? "0.0.0.0",
+    publicBaseUrl,
+  };
+}
+```
+
+Create `services/paywall/src/routes.ts`:
+
+```ts
+/**
+ * The three paid routes: price, description and Bazaar discovery metadata
+ * (spec section 9). Every example here is synthetic.
+ */
+import { declareDiscoveryExtension } from "@x402-avm/extensions";
+import { CHALLENGE_TAG, type PaywallConfig } from "./config.ts";
+
+export type PaidRoute = { key: string; path: string; price: string; description: string; discovery: Record<string, unknown> };
+
+const EXAMPLE_TEXT = "Patient Jane Roe, MRN 991122, was diagnosed with diabetes.";
+const textSchema = (verb: string) => ({
+  type: "object",
+  properties: { text: { type: "string", minLength: 1, maxLength: 20000, description: `Text to ${verb}, 1 to 20,000 characters` } },
+  required: ["text"],
+});
+
+export const PAID_ROUTES: readonly PaidRoute[] = [
+  {
+    key: "POST /v1/privacy/scan",
+    path: "/v1/privacy/scan",
+    price: "$0.002",
+    description: "Finds personal, health and card data in text and returns entity types, positions and the data class. No model is called.",
+    discovery: declareDiscoveryExtension({
+      bodyType: "json",
+      input: { text: EXAMPLE_TEXT },
+      inputSchema: textSchema("scan"),
+      output: {
+        example: {
+          decisionId: "7d0c2a1e-5b7f-4c1e-9a53-2f6f0b8e41aa",
+          dataClass: "PHI",
+          found: ["PHI", "PII"],
+          entities: [
+            { type: "PERSON", start: 8, end: 16, score: 0.85 },
+            { type: "MEDICAL_RECORD", start: 22, end: 28, score: 0.45 },
+            { type: "HEALTH_TERM", start: 34, end: 43, score: 1 },
+            { type: "HEALTH_TERM", start: 49, end: 57, score: 1 },
+          ],
+          counts: { PERSON: 1, MEDICAL_RECORD: 1, HEALTH_TERM: 2 },
+          policy: { dataCollection: "deny", cardDataRemoved: false },
+        },
+      },
+    }),
+  },
+  {
+    key: "POST /v1/privacy/mask",
+    path: "/v1/privacy/mask",
+    price: "$0.003",
+    description: "Replaces personal and health identifiers with numbered placeholders and removes card numbers. Returns the masked text and the map to restore it.",
+    discovery: declareDiscoveryExtension({
+      bodyType: "json",
+      input: { text: EXAMPLE_TEXT },
+      inputSchema: textSchema("mask"),
+      output: {
+        example: {
+          decisionId: "0b9e5f3c-2d41-4a8e-b6c7-91d2e8f4a310",
+          dataClass: "PHI",
+          found: ["PHI", "PII"],
+          maskedText: "Patient <PERSON_1>, MRN <MEDICAL_RECORD_1>, was diagnosed with diabetes.",
+          map: { "<PERSON_1>": "Jane Roe", "<MEDICAL_RECORD_1>": "991122" },
+          counts: { PERSON: 1, MEDICAL_RECORD: 1, HEALTH_TERM: 2 },
+          cardsRemoved: 0,
+        },
+      },
+    }),
+  },
+  {
+    key: "POST /v1/chat/completions",
+    path: "/v1/chat/completions",
+    price: "$0.01",
+    description: "OpenAI-compatible private chat. Masks the conversation, routes it with Jev across free models under a data policy set by what it contains, and restores the answer.",
+    discovery: declareDiscoveryExtension({
+      bodyType: "json",
+      input: {
+        model: "chainaim/auto",
+        messages: [{ role: "user", content: "Write a two-line reminder to Jane Roe (jane.roe@example.com) about Friday's 10:00 meeting." }],
+        max_tokens: 200,
+      },
+      inputSchema: {
+        type: "object",
+        properties: {
+          messages: {
+            type: "array",
+            minItems: 1,
+            description: "OpenAI chat messages; text only, at most 48,000 characters in total",
+            items: { type: "object", properties: { role: { type: "string" }, content: { description: "a string, or an array of text parts" } }, required: ["role"] },
+          },
+          model: { type: "string", description: "chainaim/auto, or a free model id from GET /v1/models" },
+          max_tokens: { type: "integer", minimum: 1, maximum: 1024 },
+          stream: { type: "boolean" },
+          tools: { type: "array" },
+          response_format: { type: "object" },
+        },
+        required: ["messages"],
+      },
+      output: {
+        example: {
+          id: "gen-1790000000-example",
+          object: "chat.completion",
+          model: "qwen/qwen3.8-27b:free",
+          choices: [
+            {
+              index: 0,
+              message: { role: "assistant", content: "Hi Jane Roe, a reminder that we meet on Friday at 10:00. Reply to jane.roe@example.com if that time doesn't work." },
+              finish_reason: "stop",
+            },
+          ],
+        },
+      },
+    }),
+  },
+];
+
+export type RouteEntry = {
+  accepts: { scheme: "exact"; price: string; network: string; payTo: string; extra: { tag: string } }[];
+  description: string;
+  mimeType: "application/json";
+  resource?: string;
+  extensions: Record<string, unknown>;
+};
+
+/** The route table for paymentMiddleware: one exact USDC price per route, the challenge tag, and the Bazaar metadata. */
+export function routesConfig(config: PaywallConfig): Record<string, RouteEntry> {
+  return Object.fromEntries(
+    PAID_ROUTES.map((r): [string, RouteEntry] => [
+      r.key,
+      {
+        accepts: [{ scheme: "exact", price: r.price, network: config.network, payTo: config.payTo, extra: { tag: CHALLENGE_TAG } }],
+        description: r.description,
+        mimeType: "application/json",
+        ...(config.publicBaseUrl ? { resource: `${config.publicBaseUrl}${r.path}` } : {}),
+        extensions: r.discovery,
+      },
+    ]),
+  );
+}
+```
+
+- [ ] **Step 5: Run the test to verify it passes**
+
+Run: `cd services/paywall && node --test test/config.test.ts`
+Expected: PASS, 8 tests, 0 failures.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add services/paywall/package.json services/paywall/package-lock.json services/paywall/src/config.ts services/paywall/src/routes.ts services/paywall/test/config.test.ts package.json
+git commit -m "feat(paywall): configuration and the paid-route table with the challenge tag" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task B2: Paywall app: capacity guard, payment, proxy and payment log
+
+**Files:**
+- Create: `services/paywall/src/app.ts`
+- Create: `services/paywall/src/main.ts`
+- Create: `services/paywall/test/stubs.ts` (stub facilitator, stub gateway, paywall starter; Task B4 reuses them)
+- Test: `services/paywall/test/paywall.test.ts`
+
+**Interfaces:**
+- Consumes: `loadConfig`, `PaywallConfig`, `NETWORKS`, `CHALLENGE_TAG` (B1); `PAID_ROUTES`, `routesConfig` (B1). The gateway's HTTP contract: `GET /internal/capacity` answers `{ chatAvailable: boolean, reason?: string, retryAfterSec?: number }`. Task C9 adds that route; until then the gateway answers 404, and the guard refuses chat (fail closed).
+- Produces:
+  - `app.ts`: `MAX_BODY_BYTES = 4 * 1024 * 1024`; `type PaywallDeps = { log?: (line: string) => void }`; `createPaywall(config: PaywallConfig, deps?: PaywallDeps): Hono`.
+  - `test/stubs.ts`: `PAY_TO` (synthetic address); `listen(server: Server): Promise<string>`; `close(server: Server): Promise<void>`; `stubFacilitator(): { server: Server; calls: string[] }`; `type Seen`; `stubGateway(): { server: Server; seen: Seen[]; state: { status: number; capacityStatus: number; capacity: Record<string, unknown> } }`; `startPaywall(env: Record<string, string>, log?: (line: string) => void): Promise<{ url: string; close(): Promise<void> }>`.
+
+- [ ] **Step 1: Write the test stubs**
+
+Create `services/paywall/test/stubs.ts`:
+
+```ts
+/**
+ * Test doubles for the paywall: a facilitator that accepts every payment and
+ * records which endpoints were called, and a gateway that records what
+ * reaches it. No real payment and no network call leave the machine.
+ */
+import { createServer, type IncomingHttpHeaders, type IncomingMessage, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { serve } from "@hono/node-server";
+import { createPaywall } from "../src/app.ts";
+import { loadConfig, NETWORKS } from "../src/config.ts";
+
+/** Synthetic Algorand address used as payTo and fee payer. */
+export const PAY_TO = "IDNTKBLAMSMIBR5DV5GRRZC7PNDOGRUOSOLHZ7BIOVXJPOWT2O24BMVDPE";
+
+export async function listen(server: Server): Promise<string> {
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
+export function close(server: Server): Promise<void> {
+  return new Promise((r) => {
+    server.closeAllConnections();
+    server.close(() => r());
+  });
+}
+
+async function readBody(req: IncomingMessage): Promise<string> {
+  let raw = "";
+  for await (const chunk of req) raw += chunk;
+  return raw;
+}
+
+/** Supports both networks, says every payment is valid, and settles with a fake transaction id. */
+export function stubFacilitator(): { server: Server; calls: string[] } {
+  const calls: string[] = [];
+  const server = createServer(async (req, res) => {
+    await readBody(req);
+    calls.push(req.url ?? "");
+    res.setHeader("content-type", "application/json");
+    if (req.url === "/supported") {
+      const kinds = Object.values(NETWORKS).map((network) => ({ x402Version: 2, scheme: "exact", network, extra: { feePayer: PAY_TO } }));
+      res.end(JSON.stringify({ kinds, extensions: ["bazaar"], signers: {} }));
+    } else if (req.url === "/verify") {
+      res.end(JSON.stringify({ isValid: true, payer: "BUYERADDRESS" }));
+    } else if (req.url === "/settle") {
+      res.end(JSON.stringify({ success: true, transaction: "TX-STUB-1", network: NETWORKS.testnet, payer: "BUYERADDRESS" }));
+    } else {
+      res.statusCode = 404;
+      res.end("{}");
+    }
+  });
+  return { server, calls };
+}
+
+export type Seen = { method: string; path: string; headers: IncomingHttpHeaders; body: string };
+
+/** Records every request. Paid paths answer with state.status; /internal/capacity with state.capacity. */
+export function stubGateway(): { server: Server; seen: Seen[]; state: { status: number; capacityStatus: number; capacity: Record<string, unknown> } } {
+  const seen: Seen[] = [];
+  const state = { status: 200, capacityStatus: 200, capacity: { chatAvailable: true } as Record<string, unknown> };
+  const server = createServer(async (req, res) => {
+    const body = await readBody(req);
+    const path = new URL(req.url ?? "/", "http://gateway.local").pathname;
+    seen.push({ method: req.method ?? "", path, headers: req.headers, body });
+    res.setHeader("content-type", "application/json");
+    if (path === "/internal/capacity") {
+      res.statusCode = state.capacityStatus;
+      res.end(JSON.stringify(state.capacity));
+      return;
+    }
+    if (path === "/healthz" || path === "/v1/models") {
+      res.end(JSON.stringify({ status: "ok" }));
+      return;
+    }
+    res.statusCode = state.status;
+    res.setHeader("x-chainaim-decision-id", "decision-1");
+    res.setHeader("x-internal-note", "must not reach the caller");
+    res.end(JSON.stringify(state.status < 400 ? { ok: true } : { error: { message: "refused", code: state.status } }));
+  });
+  return { server, seen, state };
+}
+
+/** A paywall on a loopback port. */
+export async function startPaywall(env: Record<string, string>, log?: (line: string) => void): Promise<{ url: string; close: () => Promise<void> }> {
+  const app = createPaywall(loadConfig(env), { log: log ?? (() => {}) });
+  let server: Server | undefined;
+  const url = await new Promise<string>((resolve) => {
+    server = serve({ fetch: app.fetch, port: 0, hostname: "127.0.0.1" }, (info) => resolve(`http://127.0.0.1:${info.port}`)) as Server;
+  });
+  return { url, close: () => close(server!) };
+}
+```
+
+- [ ] **Step 2: Write the failing test**
+
+Create `services/paywall/test/paywall.test.ts`:
+
+```ts
+/**
+ * The paywall over real sockets, against the stub facilitator and the stub
+ * gateway (spec section 11, item 9).
+ */
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { after, before, beforeEach, describe, it } from "node:test";
+import { CHALLENGE_TAG, NETWORKS } from "../src/config.ts";
+import { close, listen, PAY_TO, startPaywall, stubFacilitator, stubGateway } from "./stubs.ts";
+
+const KEY = "test-gateway-key";
+
+type PaymentRequired = { accepts: Record<string, any>[]; resource: { url: string }; extensions?: Record<string, any>; [key: string]: any };
+const decode = (header: string | null): PaymentRequired => JSON.parse(Buffer.from(header!, "base64").toString("utf8"));
+/** A payment payload the stub facilitator accepts: it echoes the first accepted requirement. */
+const paymentFor = (required: PaymentRequired): string =>
+  Buffer.from(JSON.stringify({ x402Version: 2, accepted: required.accepts[0], payload: { paymentGroup: ["AAAA"], paymentIndex: 0 }, resource: required.resource })).toString("base64");
+
+describe("paywall (TestNet)", () => {
+  const facilitator = stubFacilitator();
+  const gateway = stubGateway();
+  const logs: string[] = [];
+  let paywall: { url: string; close: () => Promise<void> };
+
+  before(async () => {
+    const facilitatorUrl = await listen(facilitator.server);
+    const gatewayUrl = await listen(gateway.server);
+    paywall = await startPaywall(
+      { AVM_PAY_TO: PAY_TO, GATEWAY_URL: gatewayUrl, CHAINAIM_GATEWAY_KEY: KEY, FACILITATOR_URL: facilitatorUrl, PUBLIC_BASE_URL: "https://pay.example.com" },
+      (line) => logs.push(line),
+    );
+  });
+  after(async () => {
+    await paywall.close();
+    await close(facilitator.server);
+    await close(gateway.server);
+  });
+  beforeEach(() => {
+    gateway.seen.length = 0;
+    facilitator.calls.length = 0;
+    gateway.state.status = 200;
+    gateway.state.capacityStatus = 200;
+    gateway.state.capacity = { chatAvailable: true };
+    logs.length = 0;
+  });
+
+  const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+    fetch(`${paywall.url}${path}`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+  const priceOf = async (path: string): Promise<PaymentRequired> => decode((await post(path, { text: "Jane Roe" })).headers.get("payment-required"));
+
+  it("asks for payment with the price, network, payTo, tag and Bazaar metadata", async () => {
+    for (const [path, amount] of [["/v1/privacy/scan", "2000"], ["/v1/privacy/mask", "3000"], ["/v1/chat/completions", "10000"]]) {
+      const r = await post(path, { text: "Jane Roe" });
+      assert.equal(r.status, 402, path);
+      const required = decode(r.headers.get("payment-required"));
+      const a = required.accepts[0];
+      assert.deepEqual([a.scheme, a.network, a.amount, a.asset, a.payTo, a.extra.tag], ["exact", NETWORKS.testnet, amount, "10458941", PAY_TO, CHALLENGE_TAG]);
+      assert.equal(required.resource.url, `https://pay.example.com${path}`);
+      assert.ok(required.extensions?.bazaar?.info?.input, `${path} carries Bazaar input metadata`);
+    }
+    assert.deepEqual(gateway.seen.map((s) => s.path), ["/internal/capacity"], "only the capacity guard reached the gateway");
+  });
+
+  it("never settles a paid call that the gateway refuses", async () => {
+    gateway.state.status = 503;
+    const required = await priceOf("/v1/privacy/scan");
+    facilitator.calls.length = 0;
+    const r = await post("/v1/privacy/scan", { text: "Jane Roe" }, { "payment-signature": paymentFor(required) });
+    assert.equal(r.status, 503);
+    assert.deepEqual(facilitator.calls, ["/verify"]);
+    assert.equal(r.headers.get("payment-response"), null);
+    assert.deepEqual(logs, [], "no payment logged");
+  });
+
+  it("settles a served call, returns the receipt and logs the payment without any body", async () => {
+    const required = await priceOf("/v1/privacy/mask");
+    facilitator.calls.length = 0;
+    const r = await post("/v1/privacy/mask", { text: "Jane Roe" }, { "payment-signature": paymentFor(required) });
+    assert.equal(r.status, 200);
+    assert.deepEqual(facilitator.calls, ["/verify", "/settle"]);
+    assert.equal(decode(r.headers.get("payment-response")).transaction, "TX-STUB-1");
+    assert.equal(logs.length, 1);
+    const line = JSON.parse(logs[0]);
+    assert.deepEqual(
+      [line.event, line.route, line.amount, line.asset, line.payer, line.transaction],
+      ["payment_settled", "POST /v1/privacy/mask", "3000", "10458941", "BUYERADDRESS", "TX-STUB-1"],
+    );
+    assert.ok(!logs[0].includes("Jane"), "no request text in the payment log");
+    assert.equal("decisionId" in line, false, "no decision id in the payment log");
+  });
+
+  it("forwards the body with the gateway key and never the payment headers", async () => {
+    const required = await priceOf("/v1/privacy/scan");
+    gateway.seen.length = 0;
+    await post("/v1/privacy/scan", { text: "Jane Roe" }, { "payment-signature": paymentFor(required), "x-payment": "legacy", cookie: "a=b" });
+    const s = gateway.seen.find((x) => x.path === "/v1/privacy/scan");
+    assert.ok(s, "the paid call reached the gateway");
+    assert.equal(s.headers.authorization, `Bearer ${KEY}`);
+    for (const h of ["payment-signature", "x-payment", "cookie"]) assert.equal(s.headers[h], undefined, h);
+    assert.deepEqual(JSON.parse(s.body), { text: "Jane Roe" });
+  });
+
+  it("passes back only content-type, retry-after and x-chainaim headers", async () => {
+    const required = await priceOf("/v1/privacy/scan");
+    const r = await post("/v1/privacy/scan", { text: "Jane Roe" }, { "payment-signature": paymentFor(required) });
+    assert.equal(r.headers.get("x-chainaim-decision-id"), "decision-1");
+    assert.equal(r.headers.get("x-internal-note"), null);
+  });
+
+  it("the capacity guard answers 503 with Retry-After and no price when chat cannot be served", async () => {
+    gateway.state.capacity = { chatAvailable: false, reason: "rate_limited", retryAfterSec: 17 };
+    const r = await post("/v1/chat/completions", { messages: [{ role: "user", content: "hi" }] });
+    assert.equal(r.status, 503);
+    assert.equal(r.headers.get("retry-after"), "17");
+    assert.equal(r.headers.get("payment-required"), null);
+    assert.match((await r.json()).error.message, /not charged/);
+  });
+
+  it("the capacity guard refuses chat when the gateway cannot say (fail closed)", async () => {
+    gateway.state.capacityStatus = 404;
+    const r = await post("/v1/chat/completions", { messages: [{ role: "user", content: "hi" }] });
+    assert.equal(r.status, 503);
+    assert.equal(r.headers.get("retry-after"), "60");
+    assert.equal(r.headers.get("payment-required"), null);
+  });
+
+  it("serves /healthz and /v1/models without payment, with the gateway key", async () => {
+    assert.equal((await fetch(`${paywall.url}/healthz`)).status, 200);
+    assert.equal((await fetch(`${paywall.url}/v1/models`)).status, 200);
+    assert.equal(gateway.seen.length, 2);
+    assert.ok(gateway.seen.every((s) => s.headers.authorization === `Bearer ${KEY}`));
+    assert.equal(facilitator.calls.length, 0);
+  });
+
+  it("rejects bodies over 4 MiB with 413 before any payment step", async () => {
+    const r = await post("/v1/privacy/scan", { text: "x".repeat(4_200_000) });
+    assert.equal(r.status, 413);
+    assert.equal(r.headers.get("payment-required"), null);
+  });
+
+  it("answers unknown routes with 404 and no price", async () => {
+    const r = await fetch(`${paywall.url}/v1/other`);
+    assert.equal(r.status, 404);
+    assert.equal(r.headers.get("payment-required"), null);
+  });
+});
+
+describe("paywall (MainNet)", () => {
+  const facilitator = stubFacilitator();
+  const gateway = stubGateway();
+  let paywall: { url: string; close: () => Promise<void> };
+  before(async () => {
+    paywall = await startPaywall({
+      AVM_PAY_TO: PAY_TO,
+      GATEWAY_URL: await listen(gateway.server),
+      CHAINAIM_GATEWAY_KEY: KEY,
+      FACILITATOR_URL: await listen(facilitator.server),
+      X402_NETWORK: "mainnet",
+    });
+  });
+  after(async () => {
+    await paywall.close();
+    await close(facilitator.server);
+    await close(gateway.server);
+  });
+
+  it("prices in MainNet USDC (ASA 31566704)", async () => {
+    const r = await fetch(`${paywall.url}/v1/privacy/scan`, { method: "POST", headers: { "content-type": "application/json" }, body: '{"text":"hi"}' });
+    const a = decode(r.headers.get("payment-required")).accepts[0];
+    assert.deepEqual([a.network, a.asset, a.amount], [NETWORKS.mainnet, "31566704", "2000"]);
+  });
+});
+
+describe("main", () => {
+  it("exits with a clear message when the configuration is missing", () => {
+    const cwd = fileURLToPath(new URL("../", import.meta.url));
+    const env = { ...process.env, AVM_PAY_TO: "", GATEWAY_URL: "", CHAINAIM_GATEWAY_KEY: "" };
+    const r = spawnSync(process.execPath, ["src/main.ts"], { cwd, env, encoding: "utf8" });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /AVM_PAY_TO is required/);
+  });
+});
+```
+
+- [ ] **Step 3: Run the test to verify it fails**
+
+Run: `cd services/paywall && node --test test/paywall.test.ts`
+Expected: FAIL with `ERR_MODULE_NOT_FOUND` for `../src/app.ts` (imported by `stubs.ts`).
+
+- [ ] **Step 4: Write the app and the entry point**
+
+Create `services/paywall/src/app.ts`:
+
+```ts
+/**
+ * chainaim-paywall: the only public service (spec section 9). It asks for
+ * payment (x402, exact scheme, USDC on Algorand through the GoPlausible
+ * facilitator), then proxies the call to the private gateway with the
+ * gateway key. Payment headers are never forwarded, so the gateway cannot
+ * learn who paid.
+ *
+ * Order matters: the body limit and the capacity guard run before the
+ * payment middleware, so nobody is asked to pay for a call that cannot be
+ * served. The middleware settles only responses below 400, so every refusal
+ * is free for the caller.
+ */
+import { Hono, type Context } from "hono";
+import { bodyLimit } from "hono/body-limit";
+import { paymentMiddleware, x402ResourceServer } from "@x402/hono";
+import { ExactAvmScheme } from "@x402/avm/exact/server";
+import { HTTPFacilitatorClient } from "@x402/core/server";
+import { bazaarResourceServerExtension } from "@x402-avm/extensions";
+import type { PaywallConfig } from "./config.ts";
+import { PAID_ROUTES, routesConfig } from "./routes.ts";
+
+/** The same limit as the gateway's default --max-body-bytes. */
+export const MAX_BODY_BYTES = 4 * 1024 * 1024;
+
+/** Gateway response headers passed back to the caller; everything else is dropped. */
+const PASS_BACK = /^(content-type|retry-after|x-chainaim-[a-z-]+)$/;
+
+export type PaywallDeps = { log?: (line: string) => void };
+
+function errorBody(c: Context, status: 404 | 413 | 502 | 503, message: string, headers: Record<string, string> = {}): Response {
+  return c.json({ error: { message, type: status >= 500 ? "gateway_error" : "invalid_request_error", code: status } }, status, headers);
+}
+
+export function createPaywall(config: PaywallConfig, deps: PaywallDeps = {}): Hono {
+  const log = deps.log ?? ((line: string) => console.log(line));
+  const server = new x402ResourceServer(new HTTPFacilitatorClient({ url: config.facilitatorUrl })).register(config.network, new ExactAvmScheme());
+  server.registerExtension(bazaarResourceServerExtension as never);
+  // Payment log: one line per settled payment; never a decision id or a body.
+  server.onAfterSettle(async (ctx) => {
+    const request = (ctx.transportContext as { request?: { method?: string; path?: string } } | undefined)?.request;
+    log(
+      JSON.stringify({
+        ts: new Date().toISOString(),
+        event: "payment_settled",
+        route: `${request?.method ?? "?"} ${request?.path ?? "?"}`,
+        amount: ctx.requirements.amount,
+        asset: ctx.requirements.asset,
+        network: ctx.result.network,
+        payer: ctx.result.payer ?? null,
+        transaction: ctx.result.transaction,
+      }),
+    );
+  });
+
+  /** Forward the method, path, content type and body; pass back the status, body and allowed headers. */
+  async function proxy(c: Context): Promise<Response> {
+    const headers: Record<string, string> = { authorization: `Bearer ${config.gatewayKey}` };
+    const type = c.req.header("content-type");
+    if (type) headers["content-type"] = type;
+    const init: RequestInit = { method: c.req.method, headers, signal: AbortSignal.timeout(config.gatewayTimeoutMs) };
+    if (c.req.method !== "GET" && c.req.method !== "HEAD") init.body = await c.req.arrayBuffer();
+    let upstream: Response;
+    try {
+      upstream = await fetch(`${config.gatewayUrl}${c.req.path}`, init);
+    } catch {
+      return errorBody(c, 502, "the gateway did not answer; you were not charged");
+    }
+    const out = new Headers();
+    upstream.headers.forEach((value, name) => {
+      if (PASS_BACK.test(name)) out.set(name, value);
+    });
+    return new Response(upstream.body, { status: upstream.status, headers: out });
+  }
+
+  const app = new Hono();
+  app.use(bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => errorBody(c, 413, `request body exceeds ${MAX_BODY_BYTES} bytes`) }));
+
+  // Capacity guard: no price is shown for a chat call that cannot be served now.
+  app.use("/v1/chat/completions", async (c, next) => {
+    if (c.req.method !== "POST") return next();
+    let capacity: { chatAvailable?: unknown; reason?: unknown; retryAfterSec?: unknown };
+    try {
+      const r = await fetch(`${config.gatewayUrl}/internal/capacity`, {
+        headers: { authorization: `Bearer ${config.gatewayKey}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      capacity = r.ok ? await r.json() : { reason: `gateway HTTP ${r.status}` };
+    } catch {
+      capacity = { reason: "gateway unreachable" };
+    }
+    if (capacity.chatAvailable === true) return next();
+    const retryAfter = typeof capacity.retryAfterSec === "number" && capacity.retryAfterSec > 0 ? String(Math.ceil(capacity.retryAfterSec)) : "60";
+    const reason = typeof capacity.reason === "string" ? capacity.reason : "no capacity";
+    return errorBody(c, 503, `chat is unavailable right now (${reason}); you were not charged`, { "retry-after": retryAfter });
+  });
+
+  app.use(paymentMiddleware(routesConfig(config), server));
+
+  for (const route of PAID_ROUTES) app.post(route.path, proxy);
+  app.get("/v1/models", proxy);
+  app.get("/healthz", proxy);
+  app.notFound((c) => errorBody(c, 404, `no route for ${c.req.method} ${c.req.path}`));
+  return app;
+}
+```
+
+Create `services/paywall/src/main.ts`:
+
+```ts
+/**
+ * chainaim-paywall entry point. Configuration comes from the environment;
+ * see src/config.ts and docs/deploy/railway.md.
+ */
+import { serve } from "@hono/node-server";
+import { createPaywall } from "./app.ts";
+import { loadConfig, type PaywallConfig } from "./config.ts";
+
+let config: PaywallConfig;
+try {
+  config = loadConfig(process.env);
+} catch (e) {
+  console.error(`[chainaim-paywall] ${(e as Error).message}`);
+  process.exit(1);
+}
+
+const server = serve({ fetch: createPaywall(config).fetch, port: config.port, hostname: config.host }, (info) => {
+  console.log(
+    `[chainaim-paywall] listening on ${config.host}:${info.port}  network=${config.networkName} payTo=${config.payTo} ` +
+      `gateway=${config.gatewayUrl} facilitator=${config.facilitatorUrl}${config.publicBaseUrl ? ` public=${config.publicBaseUrl}` : ""}`,
+  );
+});
+const shutdown = () => server.close(() => process.exit(0));
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+```
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+Run: `npm run test:paywall`
+Expected: PASS for `config.test.ts` and `paywall.test.ts`, 0 failures, and the run exits by itself. If a test fails, read the middleware in `services/paywall/node_modules/@x402/hono/dist/esm/index.mjs` before changing anything. The tests encode the spec, so fix the code, not the assertions.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add services/paywall/src/app.ts services/paywall/src/main.ts services/paywall/test/stubs.ts services/paywall/test/paywall.test.ts
+git commit -m "feat(paywall): x402 payment, capacity guard, header-stripping proxy and payment log" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task B3: Images, Railway config, the Presidio check and the deployment runbook
+
+**Files:**
+- Create: `services/presidio/Dockerfile`, `services/presidio/enable_recognizers.py`, `services/presidio/railway.json`
+- Create: `services/gateway/Dockerfile`, `services/gateway/railway.json`, `.dockerignore`
+- Create: `services/paywall/Dockerfile`, `services/paywall/.dockerignore`, `services/paywall/railway.json`
+- Create: `scripts/verify-presidio.ts`
+- Modify: `services/gateway/test/presidio.test.ts` (append a suite)
+- Create: `docs/deploy/railway.md`
+- Modify: `.env.example`, `package.json` (root: `verify:presidio` script)
+
+**Interfaces:**
+- Consumes: `PresidioClient`, `REQUIRED_PRESIDIO_ENTITIES`, `classify`, `CORPUS`, `KNOWN_VALUES`, `startStubPresidio` (Part A). The paywall's environment variables (B1).
+- Produces: `scripts/verify-presidio.ts`: `verifyPresidio(url: string): Promise<{ ok: boolean; lines: string[] }>` (lines hold item ids, classes and entity types, never text). Three images: presidio (port 3000 on `[::]`), gateway (port 8700 on `::`), paywall (`PORT`).
+
+- [ ] **Step 1: Write the failing test for the Presidio check**
+
+In `services/gateway/test/presidio.test.ts`, add these imports below the existing ones:
+
+```ts
+import { CORPUS, KNOWN_VALUES } from "../../../scripts/synthetic-corpus.ts";
+import { verifyPresidio } from "../../../scripts/verify-presidio.ts";
+```
+
+Append at the end of the file:
+
+```ts
+describe("scripts/verify-presidio.ts", () => {
+  let stub: StubPresidio;
+  before(async () => {
+    stub = await startStubPresidio();
+  });
+  after(() => stub.close());
+
+  it("passes against a Presidio that supports every entity and classifies the corpus", async () => {
+    const { ok, lines } = await verifyPresidio(stub.url);
+    assert.equal(ok, true, lines.join("\n"));
+    assert.equal(lines.length, CORPUS.length + 1);
+  });
+
+  it("fails when a required entity is missing, and never prints corpus text", async () => {
+    stub.mode = "missing-entities";
+    try {
+      const { ok, lines } = await verifyPresidio(stub.url);
+      assert.equal(ok, false);
+      assert.match(lines[0], /IN_AADHAAR/);
+      const printed = lines.join("\n");
+      for (const { value } of KNOWN_VALUES) assert.ok(!printed.includes(value), `${value} printed`);
+    } finally {
+      stub.mode = "ok";
+    }
+  });
+});
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `node --test services/gateway/test/presidio.test.ts`
+Expected: FAIL with `ERR_MODULE_NOT_FOUND` for `../../../scripts/verify-presidio.ts`.
+
+- [ ] **Step 3: Write the check**
+
+Create `scripts/verify-presidio.ts`:
+
+```ts
+/**
+ * V4 check against a running Presidio analyzer: every required entity is
+ * supported, and the synthetic corpus gets its expected data class with
+ * ChainAim's ad-hoc recognizers. It prints item ids, classes and entity
+ * types, never the text.
+ *
+ *   node scripts/verify-presidio.ts [--url http://127.0.0.1:5002]
+ *
+ * Exit code 0 = everything as expected.
+ */
+import { parseArgs } from "node:util";
+import { classify } from "../services/gateway/src/privacy/classify.ts";
+import { REQUIRED_PRESIDIO_ENTITIES } from "../services/gateway/src/privacy/entities.ts";
+import { PresidioClient } from "../services/gateway/src/privacy/presidio.ts";
+import { CORPUS } from "./synthetic-corpus.ts";
+
+export async function verifyPresidio(url: string): Promise<{ ok: boolean; lines: string[] }> {
+  const client = new PresidioClient({ url, threshold: 0.4, timeoutMs: 30_000 });
+  const supported = new Set(await client.supportedEntities());
+  const missing = REQUIRED_PRESIDIO_ENTITIES.filter((e) => !supported.has(e));
+  let ok = missing.length === 0;
+  const lines = [missing.length > 0 ? `FAIL missing entities: ${missing.join(", ")}` : `ok   all ${REQUIRED_PRESIDIO_ENTITIES.length} required entities are supported`];
+  for (const item of CORPUS) {
+    const found = await client.analyze(item.text);
+    const { dataClass } = classify(found.map((e) => e.type));
+    const pass = dataClass === item.expect.dataClass;
+    ok &&= pass;
+    const types = [...new Set(found.map((e) => e.type))].join(",") || "-";
+    lines.push(`${pass ? "ok  " : "FAIL"} ${item.id.padEnd(12)} dataClass=${dataClass} (want ${item.expect.dataClass}) types=${types}`);
+  }
+  return { ok, lines };
+}
+
+if (import.meta.main ?? process.argv[1]?.endsWith("verify-presidio.ts")) {
+  const { values } = parseArgs({ options: { url: { type: "string", default: "http://127.0.0.1:5002" } } });
+  const { ok, lines } = await verifyPresidio(values.url!);
+  for (const line of lines) console.log(line);
+  process.exitCode = ok ? 0 : 1;
+}
+```
+
+In the root `package.json`, add to `"scripts"` after `"stub-presidio"`:
+
+```json
+    "verify:presidio": "node scripts/verify-presidio.ts",
+```
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `node --test services/gateway/test/presidio.test.ts`
+Expected: PASS, 0 failures.
+
+- [ ] **Step 5: Write the Presidio image and test its config script with local Python**
+
+Create `services/presidio/enable_recognizers.py`:
+
+```python
+"""Copy Presidio's recognizer registry config, enabling the named predefined recognizers.
+
+Usage: enable_recognizers.py SOURCE.yaml DEST.yaml RecognizerName [RecognizerName ...]
+Exits non-zero (failing the image build) if a named recognizer is not in SOURCE.
+"""
+import sys
+
+import yaml
+
+
+def main() -> None:
+    source, dest, *names = sys.argv[1:]
+    with open(source, encoding="utf-8") as f:
+        conf = yaml.safe_load(f)
+    found = set()
+    for recognizer in conf.get("recognizers", []):
+        if isinstance(recognizer, dict) and recognizer.get("name") in names:
+            recognizer["enabled"] = True
+            found.add(recognizer["name"])
+    missing = sorted(set(names) - found)
+    if missing:
+        sys.exit(f"recognizers not found in {source}: {', '.join(missing)}")
+    with open(dest, "w", encoding="utf-8") as f:
+        yaml.safe_dump(conf, f, sort_keys=False)
+    print(f"enabled {', '.join(sorted(found))} in {dest}")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Create `services/presidio/Dockerfile`:
+
+```dockerfile
+# Presidio analyzer with the recognizers ChainAim needs (spec V4). The stock
+# configuration ships InAadhaarRecognizer and InPanRecognizer disabled; this
+# image enables them. It also binds [::] so Railway's private network (IPv6)
+# can reach it. Build context: services/presidio.
+FROM mcr.microsoft.com/presidio-analyzer:2.2.362
+USER root
+COPY enable_recognizers.py /tmp/enable_recognizers.py
+RUN python /tmp/enable_recognizers.py \
+      /app/presidio_analyzer/conf/default_recognizers.yaml \
+      /app/chainaim_recognizers.yaml \
+      InAadhaarRecognizer InPanRecognizer \
+ && chown 1001 /app/chainaim_recognizers.yaml \
+ && rm /tmp/enable_recognizers.py
+USER 1001
+ENV RECOGNIZER_REGISTRY_CONF_FILE=/app/chainaim_recognizers.yaml
+ENV PORT=3000
+EXPOSE 3000
+CMD ["sh", "-c", "exec gunicorn -w \"$WORKERS\" -b \"[::]:$PORT\" \"app:create_app()\""]
+```
+
+Create `services/presidio/railway.json`:
+
+```json
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": { "builder": "DOCKERFILE", "dockerfilePath": "Dockerfile" },
+  "deploy": { "restartPolicyType": "ALWAYS" }
+}
+```
+
+Test the script against Presidio's published default config (Python 3 with PyYAML is installed on this machine):
+
+```bash
+TMP=$(mktemp -d)
+curl -sfL https://raw.githubusercontent.com/microsoft/presidio/main/presidio-analyzer/presidio_analyzer/conf/default_recognizers.yaml -o "$TMP/src.yaml"
+python services/presidio/enable_recognizers.py "$TMP/src.yaml" "$TMP/out.yaml" InAadhaarRecognizer InPanRecognizer
+python -c "import yaml,sys; c=yaml.safe_load(open(sys.argv[1])); r={x['name']:x.get('enabled',True) for x in c['recognizers']}; print(r['InAadhaarRecognizer'], r['InPanRecognizer'], r['UsNpiRecognizer'])" "$TMP/out.yaml"
+python services/presidio/enable_recognizers.py "$TMP/src.yaml" "$TMP/bad.yaml" NoSuchRecognizer; echo "exit=$?"
+```
+
+Expected: `enabled InAadhaarRecognizer, InPanRecognizer in .../out.yaml`, then `True True False` (only the two named recognizers change), then `recognizers not found in ...: NoSuchRecognizer` and `exit=1`.
+
+- [ ] **Step 6: Write the gateway and paywall images and their Railway config**
+
+Create `services/gateway/Dockerfile`:
+
+```dockerfile
+# chainaim-gateway. Node runs the TypeScript directly: no build step and no
+# npm dependencies. Build context: the repository root.
+FROM node:24-slim
+WORKDIR /app
+ENV NODE_ENV=production
+COPY package.json ./
+COPY packages/route-engine/package.json packages/route-engine/package.json
+COPY packages/route-engine/dist packages/route-engine/dist
+COPY config config
+COPY services/gateway/src services/gateway/src
+EXPOSE 8700
+# The ledger goes to the volume mounted at /data. The process runs as root so
+# it can write to Railway's root-owned volume.
+ENTRYPOINT ["node", "services/gateway/src/main.ts"]
+CMD ["--host", "::", "--port", "8700", "--api-key-env", "CHAINAIM_GATEWAY_KEY", "--catalog", "config/catalog.json", "--health-interval-ms", "0", "--presidio-url", "http://presidio.railway.internal:3000", "--ledger", "/data/ledger"]
+```
+
+Create `services/gateway/railway.json`:
+
+```json
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": { "builder": "DOCKERFILE", "dockerfilePath": "services/gateway/Dockerfile" },
+  "deploy": { "restartPolicyType": "ALWAYS" }
+}
+```
+
+Create `.dockerignore` at the repository root:
+
+```
+.git
+**/node_modules
+.superpowers
+data
+models
+secrets
+.env
+.env.*
+eval
+docs
+```
+
+Create `services/paywall/Dockerfile`:
+
+```dockerfile
+# chainaim-paywall. Build context: services/paywall.
+FROM node:24-slim
+WORKDIR /app
+ENV NODE_ENV=production
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund
+COPY src ./src
+USER node
+EXPOSE 8080
+CMD ["node", "src/main.ts"]
+```
+
+Create `services/paywall/.dockerignore`:
+
+```
+node_modules
+test
+scripts
+```
+
+Create `services/paywall/railway.json`:
+
+```json
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": { "builder": "DOCKERFILE", "dockerfilePath": "Dockerfile" },
+  "deploy": { "restartPolicyType": "ALWAYS" }
+}
+```
+
+- [ ] **Step 7: Build the images if Docker is running**
+
+Run: `docker info --format '{{.ServerVersion}}'`
+
+If it prints a version, build all three and run the Presidio check end to end:
+
+```bash
+docker build -t chainaim-presidio services/presidio
+docker build -t chainaim-gateway -f services/gateway/Dockerfile .
+docker build -t chainaim-paywall services/paywall
+docker run -d --rm --name chainaim-presidio -p 5002:3000 chainaim-presidio
+# wait until it answers (the spaCy model takes 20 to 60 s to load)
+until curl -sf http://127.0.0.1:5002/health >/dev/null; do sleep 5; done
+npm run verify:presidio -- --url http://127.0.0.1:5002
+docker stop chainaim-presidio
+```
+
+Expected: three successful builds; the check prints `ok   all 13 required entities are supported`. Put the per-item lines in the report: they show how real detection compares with the stub (the stub's corpus lines all pass by construction). A real `FAIL` line is not a build failure; report it.
+
+If Docker is not running, write "Docker daemon not available; images not built locally" in the report, and continue. The owner builds on Railway.
+
+- [ ] **Step 8: Write the runbook and the environment example**
+
+Create `docs/deploy/railway.md`:
+
+````markdown
+# Deploying on Railway
+
+Three services in one Railway project, on its private network. Only the paywall is public. Fly.io works the same way (spec section 10).
+
+| Service (exact name) | Root directory | Config file | Public | Variables |
+|---|---|---|---|---|
+| `presidio` | `services/presidio` | `services/presidio/railway.json` | no | `PORT=3000` |
+| `gateway` | `/` | `services/gateway/railway.json` | no | `CHAINAIM_GATEWAY_KEY` (secret); `OPENROUTER_API_KEY` (secret, needed when chat launches) |
+| `paywall` | `services/paywall` | `services/paywall/railway.json` | yes | `AVM_PAY_TO`, `X402_NETWORK`, `FACILITATOR_URL`, `GATEWAY_URL`, `PUBLIC_BASE_URL`, `CHAINAIM_GATEWAY_KEY` |
+
+The service names matter: the gateway reaches `presidio.railway.internal:3000`, and the paywall reaches `gateway.railway.internal:8700`.
+
+## 1. Before you start
+
+- The repository is on GitHub (Railway builds from it, and the challenge asks for the link).
+- A payTo account: an Algorand address you control. For MainNet it must be opted in to USDC (ASA 31566704).
+- A separate buyer account for test payments (self-payments don't count for the challenge). On TestNet, fund it with ALGO and USDC from the TestNet dispensers.
+- A gateway key: `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`
+
+## 2. Create the services
+
+1. New project, then "Deploy from GitHub repo", then this repository and branch.
+2. `presidio`: Settings, Source, Root Directory `services/presidio`; Config-as-code path `services/presidio/railway.json`; variable `PORT=3000`; memory 2 GB. No public domain.
+3. `gateway`: Root Directory `/`; config path `services/gateway/railway.json`; add a Volume mounted at `/data` (the decision ledger); variable `CHAINAIM_GATEWAY_KEY` = your key. No public domain.
+4. `paywall`: Root Directory `services/paywall`; config path `services/paywall/railway.json`; Networking, Generate Domain. Variables:
+   - `AVM_PAY_TO` = your payTo address
+   - `X402_NETWORK` = `testnet` (switch to `mainnet` in step 5)
+   - `FACILITATOR_URL` = `https://facilitator.goplausible.xyz`
+   - `GATEWAY_URL` = `http://gateway.railway.internal:8700`
+   - `PUBLIC_BASE_URL` = `https://<the generated domain>`
+   - `CHAINAIM_GATEWAY_KEY` = `${{gateway.CHAINAIM_GATEWAY_KEY}}` (a reference to the gateway's value)
+
+Every service uses the restart policy "always" (set in its `railway.json`). Expect about $10 to $25 a month, mostly Presidio's memory.
+
+## 3. Check it
+
+```bash
+curl https://<domain>/healthz                     # {"status":"ok"} once Presidio is up
+curl -si -X POST https://<domain>/v1/privacy/scan -H "content-type: application/json" -d '{"text":"hi"}' | grep -i payment-required
+cd services/paywall && npm install && node scripts/pay.ts --dry-run https://<domain>/v1/privacy/scan '{"text":"hi"}'
+```
+
+The dry run prints the price (0.002 USDC), the asset, the network, your payTo and `tag=x402-global-challenge`. If the gateway can't start, its log names the missing Presidio entity or the unreachable Presidio.
+
+## 4. Pay on TestNet
+
+```bash
+cd services/paywall
+AVM_MNEMONIC="<buyer's 25 words>" node scripts/pay.ts https://<domain>/v1/privacy/scan '{"text":"Patient Jane Roe, MRN 991122, was diagnosed with diabetes."}'
+```
+
+Expect `HTTP 200`, the scan result and a payment line with a transaction id. The paywall's log shows one `payment_settled` line.
+
+## 5. Switch to MainNet
+
+1. Set `X402_NETWORK=mainnet` and `AVM_PAY_TO` to the MainNet payTo account (opted in to USDC). The service redeploys.
+2. Make one real payment per live route from the separate buyer account: scan and mask now, chat when it launches. The challenge tag is written at settlement, so it is already on the first payment.
+3. Check the Bazaar: `curl 'https://facilitator.goplausible.xyz/discovery/resources?limit=100'` and look for your domain.
+
+## 6. Monitor
+
+Create a free UptimeRobot HTTP monitor on `https://<domain>/healthz` every 5 minutes with email alerts. The paywall proxies it to the gateway, which checks Presidio, so one monitor covers all three services.
+
+## 7. When chat launches
+
+Add `OPENROUTER_API_KEY` to the gateway, buy $10 of OpenRouter credits (1,000 free-model requests a day), and redeploy the gateway. From Task C10 on its image runs with `--model-source openrouter-free`.
+````
+
+Replace `.env.example` with:
+
+```
+# Variable NAMES only. Real values live in your OS keychain or secrets manager
+# (on Railway: service variables) and reach each service as environment variables.
+
+# Bearer key shared by the gateway (--api-key-env CHAINAIM_GATEWAY_KEY) and the paywall
+CHAINAIM_GATEWAY_KEY=
+
+# Gateway: OpenRouter key for the free chat models and Jev (--model-source openrouter-free)
+OPENROUTER_API_KEY=
+
+# Paywall (services/paywall)
+AVM_PAY_TO=
+X402_NETWORK=testnet
+FACILITATOR_URL=https://facilitator.goplausible.xyz
+GATEWAY_URL=http://127.0.0.1:8700
+PUBLIC_BASE_URL=
+
+# Per-deployment upstream keys, referenced by "apiKeyEnv" in config/catalog.json
+# CHAINAIM_OPENAI_KEY=
+# CHAINAIM_ANTHROPIC_KEY=
+# CHAINAIM_GPU_CLOUD_KEY=
+```
+
+- [ ] **Step 9: Run both suites and commit**
+
+Run: `npm test` and `npm run test:paywall`
+Expected: both PASS with 0 failures.
+
+```bash
+git add services/presidio services/gateway/Dockerfile services/gateway/railway.json .dockerignore services/paywall/Dockerfile services/paywall/.dockerignore services/paywall/railway.json scripts/verify-presidio.ts services/gateway/test/presidio.test.ts docs/deploy/railway.md .env.example package.json
+git commit -m "build: Presidio, gateway and paywall images, Railway config and deployment runbook" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task B4: Payment client for the TestNet and MainNet checks
+
+**Files:**
+- Create: `services/paywall/scripts/pay.ts`
+- Modify: `services/paywall/package.json` (devDependencies and a `pay` script), `services/paywall/package-lock.json`
+- Test: `services/paywall/test/pay.test.ts`
+
+**Interfaces:**
+- Consumes: `startPaywall`, `stubFacilitator`, `stubGateway`, `listen`, `close`, `PAY_TO` (B2 `test/stubs.ts`).
+- Produces: `node scripts/pay.ts [--dry-run] URL [JSON_BODY]` (run from `services/paywall`). `--dry-run` prints the price and pays nothing. Without it, it pays with the account in `AVM_MNEMONIC`. Exit codes: 0 success, 1 HTTP failure, 2 usage or missing mnemonic.
+
+**Safety:** the paying path moves real funds on MainNet. The implementer runs only `--dry-run` and the usage checks. The owner runs real payments (docs/deploy/railway.md steps 4 and 5).
+
+- [ ] **Step 1: Add the client dependencies**
+
+Run (from `services/paywall`; it can take several minutes):
+
+```bash
+npm install --save-dev --save-exact --no-audit --no-fund @x402/fetch@2.27.0 @algorandfoundation/algokit-utils@10.0.0-alpha.42
+```
+
+Then add to `"scripts"` in `services/paywall/package.json`:
+
+```json
+    "pay": "node scripts/pay.ts",
+```
+
+Check that the imports resolve (run from `services/paywall`):
+
+```bash
+node --input-type=module -e "await Promise.all([import('@x402/fetch'), import('@x402/avm/exact/client'), import('@algorandfoundation/algokit-utils/algo25'), import('@algorandfoundation/algokit-utils/crypto')]); console.log('imports ok')"
+```
+
+Expected: `imports ok`.
+
+- [ ] **Step 2: Write the failing test**
+
+Create `services/paywall/test/pay.test.ts`:
+
+```ts
+/**
+ * scripts/pay.ts against a local paywall with the stub facilitator: --dry-run
+ * reads the price and pays nothing. The paying path needs a funded buyer
+ * account; the owner runs it (docs/deploy/railway.md).
+ */
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { after, before, describe, it } from "node:test";
+import { close, listen, PAY_TO, startPaywall, stubFacilitator, stubGateway } from "./stubs.ts";
+
+const cwd = fileURLToPath(new URL("../", import.meta.url));
+
+/** Async on purpose: the paywall runs in this process and must keep answering. */
+function run(args: string[], env: Record<string, string> = {}): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ["scripts/pay.ts", ...args], { cwd, env: { ...process.env, ...env } });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d) => (stdout += d));
+    child.stderr.on("data", (d) => (stderr += d));
+    child.on("close", (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+describe("scripts/pay.ts", () => {
+  const facilitator = stubFacilitator();
+  const gateway = stubGateway();
+  let paywall: { url: string; close: () => Promise<void> };
+  before(async () => {
+    paywall = await startPaywall({
+      AVM_PAY_TO: PAY_TO,
+      GATEWAY_URL: await listen(gateway.server),
+      CHAINAIM_GATEWAY_KEY: "test-key",
+      FACILITATOR_URL: await listen(facilitator.server),
+    });
+  });
+  after(async () => {
+    await paywall.close();
+    await close(facilitator.server);
+    await close(gateway.server);
+  });
+
+  it("--dry-run shows the price, network, payTo and tag, and pays nothing", async () => {
+    const r = await run(["--dry-run", `${paywall.url}/v1/privacy/scan`, JSON.stringify({ text: "hi" })]);
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(r.stdout.includes("price 0.002 USDC (asset 10458941)"), r.stdout);
+    assert.ok(r.stdout.includes(`to ${PAY_TO}; tag=x402-global-challenge`), r.stdout);
+    assert.ok(r.stdout.includes("bazaar=yes"), r.stdout);
+    assert.ok(!facilitator.calls.includes("/verify") && !facilitator.calls.includes("/settle"), "nothing was verified or settled");
+  });
+
+  it("needs a URL", async () => {
+    const r = await run([]);
+    assert.equal(r.code, 2);
+    assert.ok(r.stderr.includes("usage"), r.stderr);
+  });
+
+  it("refuses to pay without AVM_MNEMONIC", async () => {
+    const r = await run([`${paywall.url}/v1/privacy/scan`, JSON.stringify({ text: "hi" })], { AVM_MNEMONIC: "" });
+    assert.equal(r.code, 2);
+    assert.ok(r.stderr.includes("AVM_MNEMONIC"), r.stderr);
+  });
+});
+```
+
+- [ ] **Step 3: Run the test to verify it fails**
+
+Run: `cd services/paywall && node --test test/pay.test.ts`
+Expected: FAIL: the child exits with code 1 and a module-not-found error for `scripts/pay.ts`.
+
+- [ ] **Step 4: Write the client**
+
+Create `services/paywall/scripts/pay.ts`:
+
+```ts
+/**
+ * Pay for one call to a deployed paywall route: x402, exact scheme, USDC on
+ * Algorand. The buyer is the account whose 25-word mnemonic is in
+ * AVM_MNEMONIC; use an account other than payTo (self-payments do not count
+ * for the challenge). --dry-run shows the price and pays nothing.
+ *
+ *   node scripts/pay.ts --dry-run https://PAYWALL/v1/privacy/scan '{"text":"..."}'
+ *   AVM_MNEMONIC="word1 ... word25" node scripts/pay.ts https://PAYWALL/v1/privacy/scan '{"text":"..."}'
+ */
+import { parseArgs } from "node:util";
+
+const { values, positionals } = parseArgs({ allowPositionals: true, options: { "dry-run": { type: "boolean", default: false } } });
+const [url, body = "{}"] = positionals;
+if (!url) {
+  console.error("usage: node scripts/pay.ts [--dry-run] URL [JSON_BODY]");
+  process.exit(2);
+}
+JSON.parse(body); // fail early on a malformed body
+const init = { method: "POST", headers: { "content-type": "application/json" }, body };
+
+if (values["dry-run"]) {
+  const r = await fetch(url, init);
+  const header = r.headers.get("payment-required");
+  if (r.status !== 402 || !header) {
+    console.log(`HTTP ${r.status}, no payment asked: ${(await r.text()).slice(0, 300)}`);
+    process.exit(r.ok ? 0 : 1);
+  }
+  const required = JSON.parse(Buffer.from(header, "base64").toString("utf8"));
+  for (const a of required.accepts) {
+    console.log(`price ${Number(a.amount) / 1e6} USDC (asset ${a.asset}) on ${a.network} to ${a.payTo}; tag=${a.extra?.tag ?? "none"}`);
+  }
+  console.log(`resource ${required.resource?.url}; bazaar=${required.extensions?.bazaar ? "yes" : "no"}`);
+  process.exit(0);
+}
+
+const mnemonic = process.env.AVM_MNEMONIC?.trim();
+if (!mnemonic) {
+  console.error("AVM_MNEMONIC is required: the buyer account's 25 words");
+  process.exit(2);
+}
+// Loaded only when paying, so --dry-run needs no signing libraries.
+const { x402Client, wrapFetchWithPayment, x402HTTPClient } = await import("@x402/fetch");
+const { toClientAvmSigner } = await import("@x402/avm");
+const { ExactAvmScheme } = await import("@x402/avm/exact/client");
+const { seedFromMnemonic } = await import("@algorandfoundation/algokit-utils/algo25");
+const { ed25519SigningKeyFromWrappedSecret } = await import("@algorandfoundation/algokit-utils/crypto");
+
+// The signer takes seed + public key, base64, as in the x402 Algorand examples.
+const seed = seedFromMnemonic(mnemonic);
+const seedCopy = new Uint8Array(seed);
+const key = await ed25519SigningKeyFromWrappedSecret({ unwrapEd25519Seed: async () => seed, wrapEd25519Seed: async () => {} });
+const signer = toClientAvmSigner(Buffer.concat([Buffer.from(seedCopy), Buffer.from(key.ed25519Pubkey)]).toString("base64"));
+const client = new x402Client().register("algorand:*", new ExactAvmScheme(signer));
+console.log(`buyer ${signer.address}`);
+
+const r = await wrapFetchWithPayment(fetch, client)(url, init);
+console.log(`HTTP ${r.status}`);
+console.log((await r.text()).slice(0, 1000));
+if (r.ok) console.log(`payment ${JSON.stringify(new x402HTTPClient(client).getPaymentSettleResponse((name) => r.headers.get(name)))}`);
+process.exitCode = r.ok ? 0 : 1;
+```
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+Run: `npm run test:paywall`
+Expected: PASS for all three paywall test files, 0 failures.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add services/paywall/scripts/pay.ts services/paywall/test/pay.test.ts services/paywall/package.json services/paywall/package-lock.json
+git commit -m "feat(paywall): x402 payment client with a dry run for the TestNet and MainNet checks" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+**Milestone B done when** `npm run test:paywall` and `npm test` pass. Then the owner follows `docs/deploy/railway.md`: deploy, pay on TestNet, switch to MainNet, and make a real payment on scan and on mask. Both must then appear in the Bazaar.
+
+---
+
+## Part C
+
+Part C (private chat) is added to this file before its tasks start.
