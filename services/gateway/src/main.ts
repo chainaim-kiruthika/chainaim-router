@@ -10,6 +10,7 @@ import { loadCatalog, PROFILES, type Profile } from "./catalog.ts";
 import { Engine, type Strategy } from "./engine.ts";
 import { Ledger } from "./ledger.ts";
 import { Pool } from "./pool.ts";
+import { PresidioClient, waitForPresidio } from "./privacy/presidio.ts";
 import { createGateway } from "./server.ts";
 
 const USAGE = `chainaim-gateway [flags]
@@ -26,6 +27,11 @@ const USAGE = `chainaim-gateway [flags]
   --health-timeout-ms N      per-probe timeout                          (default 3000)
   --unhealthy-after N        consecutive failures before cooldown       (default 2)
   --cooldown-ms N            how long a failed deployment sits out      (default 30000)
+  --presidio-url URL         Presidio analyzer                          (default http://127.0.0.1:5002)
+  --presidio-threshold N     minimum entity score, 0 to 1               (default 0.4)
+  --presidio-timeout-ms N    per Presidio call                          (default 10000)
+  --presidio-wait-ms N       how long start-up waits for Presidio       (default 120000)
+  --presidio-check-ms N      Presidio health check period               (default 30000)
   --ledger DIR|off           decision ledger directory                  (default data/ledger)
   --max-body-bytes N         request size limit                         (default 4194304)
   --api-key-env NAME         env var holding the gateway bearer key     (default none = no auth)
@@ -34,6 +40,12 @@ const USAGE = `chainaim-gateway [flags]
 function int(name: string, value: string, min: number): number {
   const n = Number(value);
   if (!Number.isInteger(n) || n < min) throw new Error(`--${name} must be an integer >= ${min}, got ${value}`);
+  return n;
+}
+
+function num(name: string, value: string, min: number, max: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < min || n > max) throw new Error(`--${name} must be a number from ${min} to ${max}, got ${value}`);
   return n;
 }
 
@@ -54,6 +66,11 @@ export function parseFlags(argv: string[]) {
       "health-timeout-ms": { type: "string", default: "3000" },
       "unhealthy-after": { type: "string", default: "2" },
       "cooldown-ms": { type: "string", default: "30000" },
+      "presidio-url": { type: "string", default: "http://127.0.0.1:5002" },
+      "presidio-threshold": { type: "string", default: "0.4" },
+      "presidio-timeout-ms": { type: "string", default: "10000" },
+      "presidio-wait-ms": { type: "string", default: "120000" },
+      "presidio-check-ms": { type: "string", default: "30000" },
       ledger: { type: "string", default: "data/ledger" },
       "max-body-bytes": { type: "string", default: String(4 * 1024 * 1024) },
       "api-key-env": { type: "string" },
@@ -62,6 +79,7 @@ export function parseFlags(argv: string[]) {
   });
   if (values.strategy !== "rules" && values.strategy !== "portfolio") throw new Error("--strategy must be rules or portfolio");
   if (!(PROFILES as readonly string[]).includes(values["default-profile"]!)) throw new Error(`--default-profile must be one of ${PROFILES.join(", ")}`);
+  if (!URL.canParse(values["presidio-url"]!)) throw new Error("--presidio-url must be a URL");
   return {
     help: values.help!,
     catalog: values.catalog!,
@@ -76,6 +94,11 @@ export function parseFlags(argv: string[]) {
     healthTimeoutMs: int("health-timeout-ms", values["health-timeout-ms"]!, 1),
     unhealthyAfter: int("unhealthy-after", values["unhealthy-after"]!, 1),
     cooldownMs: int("cooldown-ms", values["cooldown-ms"]!, 0),
+    presidioUrl: values["presidio-url"]!,
+    presidioThreshold: num("presidio-threshold", values["presidio-threshold"]!, 0, 1),
+    presidioTimeoutMs: int("presidio-timeout-ms", values["presidio-timeout-ms"]!, 1),
+    presidioWaitMs: int("presidio-wait-ms", values["presidio-wait-ms"]!, 0),
+    presidioCheckMs: int("presidio-check-ms", values["presidio-check-ms"]!, 0),
     ledgerDir: values.ledger === "off" ? undefined : values.ledger!,
     maxBodyBytes: int("max-body-bytes", values["max-body-bytes"]!, 1024),
     apiKeyEnv: values["api-key-env"],
@@ -94,6 +117,11 @@ async function main(): Promise<void> {
     throw new Error("refusing to listen on a non-loopback address without --api-key-env");
   }
 
+  // Refuse to start without a Presidio that detects every required entity (V4).
+  const presidio = new PresidioClient({ url: f.presidioUrl, threshold: f.presidioThreshold, timeoutMs: f.presidioTimeoutMs });
+  await waitForPresidio(presidio, f.presidioWaitMs);
+  presidio.start(f.presidioCheckMs);
+
   const catalog = loadCatalog(f.catalog);
   const engine = new Engine(catalog, { strategy: f.strategy, defaultProfile: f.defaultProfile, defaultMaxTokens: f.defaultMaxTokens });
   const pool = new Pool(catalog, {
@@ -107,24 +135,23 @@ async function main(): Promise<void> {
   await pool.checkAll();
   pool.start();
 
-  const server = createGateway(engine, pool, ledger, {
-    maxAttempts: f.maxAttempts,
-    attemptTimeoutMs: f.attemptTimeoutMs,
-    maxBodyBytes: f.maxBodyBytes,
-    gatewayKey,
-  });
+  const server = createGateway(
+    { engine, pool, ledger, presidio },
+    { maxAttempts: f.maxAttempts, attemptTimeoutMs: f.attemptTimeoutMs, maxBodyBytes: f.maxBodyBytes, gatewayKey },
+  );
   server.listen(f.port, f.host, () => {
     const addr = server.address();
     const port = typeof addr === "object" && addr ? addr.port : f.port;
     const down = pool.unavailableModels();
     console.log(
       `[chainaim-gateway] listening on http://${f.host}:${port}  catalog=${catalog.version} models=${catalog.models.length} ` +
-        `strategy=${f.strategy} ledger=${ledger.enabled ? f.ledgerDir : "off"} auth=${gatewayKey ? "on" : "off"}` +
+        `strategy=${f.strategy} presidio=${presidio.url} ledger=${ledger.enabled ? f.ledgerDir : "off"} auth=${gatewayKey ? "on" : "off"}` +
         (down.length ? `  unavailable=${down.join(",")}` : ""),
     );
   });
   const shutdown = () => {
     pool.stop();
+    presidio.stop();
     server.close(() => process.exit(0));
   };
   process.on("SIGINT", shutdown);

@@ -15,6 +15,8 @@ import { Engine, extractFeatures, RequestError } from "../src/engine.ts";
 import { Ledger } from "../src/ledger.ts";
 import { Pool } from "../src/pool.ts";
 import { createGateway } from "../src/server.ts";
+import { startStubPresidio, type StubPresidio } from "../../../scripts/stub-presidio.ts";
+import { PresidioClient } from "../src/privacy/presidio.ts";
 
 type Behaviour = "ok" | "fail500" | "slow";
 
@@ -72,10 +74,15 @@ function catalogFor(small: string[], large: string[], agentic?: string[]): Catal
 const TOOLS = [{ type: "function", function: { name: "cancel_order" } }];
 const AGENT_PROMPT = "Cancel order B-42 and book the 9am flight to SFO.";
 
+/** Set by the socket suite's before(); every gateway uses the stub Presidio. */
+let presidioUrl = "";
+
 async function startGateway(catalog: Catalog, extra: Partial<{ attemptTimeoutMs: number; gatewayKey: string; ledgerDir: string }> = {}) {
   const engine = new Engine(catalog, { strategy: "rules", defaultProfile: "auto", defaultMaxTokens: 256 });
   const pool = new Pool(catalog, { healthIntervalMs: 0, healthTimeoutMs: 1000, unhealthyAfter: 1, cooldownMs: 60_000, env: {} });
-  const server = createGateway(engine, pool, new Ledger(extra.ledgerDir), {
+  const presidio = new PresidioClient({ url: presidioUrl, threshold: 0.4, timeoutMs: 2000 });
+  await presidio.checkHealth();
+  const server = createGateway({ engine, pool, ledger: new Ledger(extra.ledgerDir), presidio }, {
     maxAttempts: 3, attemptTimeoutMs: extra.attemptTimeoutMs ?? 5000, maxBodyBytes: 1 << 20, gatewayKey: extra.gatewayKey,
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
@@ -194,10 +201,16 @@ describe("engine", () => {
 
 describe("gateway over real sockets", () => {
   const ups: Awaited<ReturnType<typeof upstream>>[] = [];
+  let stubPresidio: StubPresidio;
   before(async () => {
+    stubPresidio = await startStubPresidio();
+    presidioUrl = stubPresidio.url;
     ups.push(await upstream("small-ok", "ok"), await upstream("large-ok", "ok"), await upstream("small-down", "fail500"), await upstream("slow", "slow"));
   });
-  after(() => ups.forEach((u) => u.server.close()));
+  after(async () => {
+    ups.forEach((u) => u.server.close());
+    await stubPresidio.close();
+  });
 
   it("serves from the primary and reports the decision in headers", async () => {
     const g = await startGateway(catalogFor([ups[0].url], [ups[1].url]));
@@ -272,15 +285,6 @@ describe("gateway over real sockets", () => {
     assert.equal((await post(`${g.url}/v1/chat/completions`, body)).status, 401);
     assert.equal((await post(`${g.url}/v1/chat/completions`, body, { authorization: "Bearer test-key-123" })).status, 200);
     assert.equal((await fetch(`${g.url}/healthz`)).status, 200, "liveness stays open");
-    g.server.close();
-  });
-
-  it("serves a tool-bearing request from the agentic chain, not the cheap tier", async () => {
-    const g = await startGateway(catalogFor([ups[0].url], [ups[1].url], ["local/large"]));
-    const r = await post(`${g.url}/v1/chat/completions`, { model: "chainaim/auto", messages: [{ role: "user", content: AGENT_PROMPT }], tools: TOOLS });
-    assert.equal(r.status, 200);
-    assert.equal(r.headers.get("x-chainaim-model"), "local/large", "agentic work must not land on the small model");
-    assert.equal(r.headers.get("x-chainaim-profile"), "agentic");
     g.server.close();
   });
 

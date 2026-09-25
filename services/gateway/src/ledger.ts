@@ -1,15 +1,18 @@
 /**
- * Decision ledger: one JSON line per request describing how it was routed.
+ * Decision ledger: one JSON line per request.
  *
- * It records sizes, flags, the decision and every attempt. It never records
- * prompt or response text, so the file is not a copy of sensitive data.
+ * It records classes, counts, sizes, the routing decision and every attempt.
+ * It never records request or response text, placeholders or the placeholder
+ * map, so the file is not a copy of sensitive data.
  */
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Attempt } from "./dispatch.ts";
 import type { Decision, RequestFeatures } from "./engine.ts";
+import type { DataClass, FoundClass } from "./privacy/classify.ts";
 
-export type LedgerEntry = {
+/** A chat request routed by profile (retired in Task C9). */
+export type RoutedEntry = {
   ts: string;
   decisionId: string;
   requestedModel?: string;
@@ -20,6 +23,22 @@ export type LedgerEntry = {
   status: number;
   latencyMs: number;
 };
+
+/** A scan or mask call: what was found, never the text. */
+export type PrivacyEntry = {
+  ts: string;
+  decisionId: string;
+  endpoint: "scan" | "mask";
+  dataClass?: DataClass;
+  found?: FoundClass[];
+  entityCounts?: Record<string, number>;
+  cardsRemoved?: number;
+  status: number;
+  latencyMs: number;
+  textChars: number;
+};
+
+export type LedgerEntry = RoutedEntry | PrivacyEntry;
 
 export class Ledger {
   private readonly dir: string | undefined;

@@ -16,11 +16,13 @@ client ──▶ chainaim-gateway :8700 ──▶ @chainaim/route-engine (decide
 ## Endpoints
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
+| POST | /v1/privacy/scan | gateway key if set | Entities (type, UTF-16 start/end, score), classes and data policy; no model is called |
+| POST | /v1/privacy/mask | gateway key if set | Masked text, placeholder map, counts, cards removed |
 | POST | /v1/chat/completions | gateway key if set | Route + dispatch; streaming supported |
 | POST | /v1/route/explain | gateway key if set | Decision only; nothing sent to a model |
 | GET | /v1/models | gateway key if set | Catalog models + `chainaim/auto`, `chainaim/eco`, `chainaim/premium` |
 | GET | /v1/deployments | gateway key if set | Per-deployment health, in-flight, last error |
-| GET | /healthz | none | Liveness only |
+| GET | /healthz | none | 200 when Presidio answered its last check, else 503 |
 
 Response headers: `x-chainaim-decision-id`, `x-chainaim-model`, `x-chainaim-deployment`,
 `x-chainaim-tier`, `x-chainaim-profile`, `x-chainaim-attempts`.
@@ -115,6 +117,20 @@ curl.exe "http://127.0.0.1:8081/admin/mode?m=fail500" # force 5xx
 curl.exe "http://127.0.0.1:8081/admin/mode?m=slow"    # 3 s delay
 curl.exe "http://127.0.0.1:8081/admin/mode?m=ok"      # healthy again
 ```
+
+## Privacy endpoints locally
+
+The gateway needs a Presidio analyzer. Without Docker, the stub detects the synthetic corpus in
+`scripts/synthetic-corpus.ts` (never real data):
+
+```powershell
+npm run stub-presidio                                   # terminal 1, port 5002
+npm run gateway -- --catalog config/catalog.json        # terminal 2
+Invoke-RestMethod http://127.0.0.1:8700/v1/privacy/mask -Method Post -ContentType application/json `
+  -Body '{"text":"Patient Jane Roe, MRN 991122, was diagnosed with diabetes."}'
+```
+
+The gateway refuses to start until Presidio answers and supports every required entity.
 
 ## Routing strategies
 

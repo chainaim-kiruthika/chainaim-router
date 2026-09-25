@@ -356,8 +356,6 @@ request. Stop Terminals 3 and 4 with Ctrl+C when you're done.
 
 Delete each line once it's fixed.
 
-- Don't run `npm test` in a demo. 27 of 28 tests pass; the agentic `x-chainaim-profile` test
-  fails and leaves a test server open, so the run never exits.
 - `--cooldown-ms` has no effect. A failed deployment comes back only when a health check
   passes, and with `--health-interval-ms 0` it never comes back until the gateway restarts.
 

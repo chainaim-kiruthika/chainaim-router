@@ -1,34 +1,38 @@
 /**
  * ChainAim gateway HTTP surface (OpenAI-compatible).
  *
+ *   POST /v1/privacy/scan       entities and data class; no model is called
+ *   POST /v1/privacy/mask       masked text and the placeholder map
  *   POST /v1/chat/completions   route + dispatch (stream or not)
  *   POST /v1/route/explain      decision only, nothing is sent to a model
  *   GET  /v1/models             catalog models + chainaim/* routing profiles
  *   GET  /v1/deployments        per-deployment health (authenticated)
- *   GET  /healthz               liveness only, no details (unauthenticated)
+ *   GET  /healthz               200 when Presidio answered its last check (unauthenticated)
  */
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { PROFILES } from "./catalog.ts";
 import { dispatch, type DispatchOptions } from "./dispatch.ts";
-import { Engine, PROFILE_PREFIX, RequestError, type ChatRequest } from "./engine.ts";
+import { PROFILE_PREFIX, RequestError, type ChatRequest, type Engine } from "./engine.ts";
+import { HttpError } from "./errors.ts";
 import type { Ledger } from "./ledger.ts";
 import type { Pool } from "./pool.ts";
+import { classify, countTypes } from "./privacy/classify.ts";
+import type { Detected } from "./privacy/entities.ts";
+import { Masker } from "./privacy/mask.ts";
+import { PresidioError, type PresidioClient } from "./privacy/presidio.ts";
+
+/** Scan and mask accept a text of 1 to this many characters. */
+export const MAX_TEXT_CHARS = 20_000;
+
+export type GatewayDeps = { engine: Engine; pool: Pool; ledger: Ledger; presidio: PresidioClient };
 
 export type ServerOptions = DispatchOptions & {
   maxBodyBytes: number;
   /** Bearer token clients must send; undefined = no gateway auth (bind to localhost only). */
   gatewayKey: string | undefined;
 };
-
-class HttpError extends Error {
-  status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
 
 function sendJson(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
   if (res.headersSent) {
@@ -67,11 +71,54 @@ function authorized(req: IncomingMessage, key: string | undefined): boolean {
   return given.length === expected.length && timingSafeEqual(given, expected);
 }
 
-export function createGateway(engine: Engine, pool: Pool, ledger: Ledger, opts: ServerOptions): Server {
+export function createGateway(deps: GatewayDeps, opts: ServerOptions): Server {
+  const { engine, pool, ledger, presidio } = deps;
   const models = () => [
     ...PROFILES.map((p) => ({ id: `${PROFILE_PREFIX}${p}`, object: "model", owned_by: "chainaim", kind: "routing-profile" })),
     ...engine.catalog.models.map((m) => ({ id: m.id, object: "model", owned_by: m.zone, kind: "model", deployments: m.deployments.length })),
   ];
+
+  /** scan and mask (spec section 4): detect, classify, and for mask replace. */
+  async function privacy(kind: "scan" | "mask", req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const started = performance.now();
+    const decisionId = randomUUID();
+    const body = await readJson(req, opts.maxBodyBytes);
+    const text = (body as { text?: unknown } | null)?.text;
+    if (typeof text !== "string" || text.length < 1 || text.length > MAX_TEXT_CHARS) {
+      throw new HttpError(400, `text: a string of 1 to ${MAX_TEXT_CHARS} characters is required`);
+    }
+    const headers = { "x-chainaim-decision-id": decisionId };
+    const entry = { ts: new Date().toISOString(), decisionId, endpoint: kind, textChars: text.length };
+    const latencyMs = () => Math.round(performance.now() - started);
+
+    let entities: Detected[];
+    try {
+      entities = await presidio.analyze(text);
+    } catch (e) {
+      if (!(e instanceof PresidioError)) throw e;
+      ledger.write({ ...entry, status: 503, latencyMs: latencyMs() });
+      sendError(res, 503, "the privacy scanner is unavailable; try again shortly", headers);
+      return;
+    }
+    const classes = classify(entities.map((e) => e.type));
+    const counts = countTypes(entities);
+    const found = { dataClass: classes.dataClass, found: classes.found, entityCounts: counts };
+
+    if (kind === "scan") {
+      sendJson(res, 200, { decisionId, dataClass: classes.dataClass, found: classes.found, entities, counts, policy: classes.policy }, headers);
+      ledger.write({ ...entry, ...found, cardsRemoved: 0, status: 200, latencyMs: latencyMs() });
+      return;
+    }
+    const masker = new Masker();
+    const maskedText = masker.mask(text, entities);
+    sendJson(
+      res,
+      200,
+      { decisionId, dataClass: classes.dataClass, found: classes.found, maskedText, map: masker.map, counts, cardsRemoved: masker.cardsRemoved },
+      headers,
+    );
+    ledger.write({ ...entry, ...found, cardsRemoved: masker.cardsRemoved, status: 200, latencyMs: latencyMs() });
+  }
 
   async function chat(req: IncomingMessage, res: ServerResponse, explainOnly: boolean): Promise<void> {
     const started = performance.now();
@@ -156,13 +203,20 @@ export function createGateway(engine: Engine, pool: Pool, ledger: Ledger, opts: 
     const url = new URL(req.url ?? "/", "http://gateway.local");
     try {
       if (req.method === "GET" && url.pathname === "/healthz") {
-        // Unauthenticated liveness only: no model or deployment details here.
-        const allDown = pool.unavailableModels().length === engine.catalog.models.length;
-        sendJson(res, allDown ? 503 : 200, { status: allDown ? "no_models_available" : "ok" });
+        // Unauthenticated: says only whether Presidio answered its last check.
+        sendJson(res, presidio.healthy ? 200 : 503, { status: presidio.healthy ? "ok" : "privacy_scanner_unavailable" });
         return;
       }
       if (!authorized(req, opts.gatewayKey)) {
         sendError(res, 401, "missing or invalid gateway API key");
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/v1/privacy/scan") {
+        await privacy("scan", req, res);
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/v1/privacy/mask") {
+        await privacy("mask", req, res);
         return;
       }
       if (req.method === "GET" && url.pathname === "/v1/deployments") {
@@ -183,7 +237,8 @@ export function createGateway(engine: Engine, pool: Pool, ledger: Ledger, opts: 
       }
       sendError(res, 404, `no route for ${req.method} ${url.pathname}`);
     } catch (e) {
-      if (e instanceof HttpError || e instanceof RequestError) sendError(res, e.status, e.message);
+      if (e instanceof HttpError) sendError(res, e.status, e.message, e.headers);
+      else if (e instanceof RequestError) sendError(res, e.status, e.message);
       else {
         console.error(`[chainaim-gateway] ${req.method} ${url.pathname}:`, e);
         sendError(res, 500, "internal gateway error");
