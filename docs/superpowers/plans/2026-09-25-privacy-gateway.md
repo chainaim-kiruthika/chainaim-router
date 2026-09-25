@@ -935,6 +935,7 @@ git commit -m "feat(privacy): Presidio client with fail-closed errors, stub Pres
 **Files:**
 - Create: `services/gateway/src/privacy/mask.ts`
 - Create: `services/gateway/src/privacy/restore.ts`
+- Create: `services/gateway/test/helpers.ts` (`withCardsRemoved`, shared with the scan and mask tests in Task A4)
 - Modify: `services/gateway/test/privacy.test.ts` (append two suites)
 
 **Interfaces:**
@@ -942,17 +943,36 @@ git commit -m "feat(privacy): Presidio client with fail-closed errors, stub Pres
 - Produces:
   - `mask.ts`: `CARD_REMOVED = "[CARD REMOVED]"`; `class Masker { readonly map: Record<string, string>; cardsRemoved: number; mask(text: string, entities: readonly Detected[]): string }`.
   - `restore.ts`: `type RestoreStats = { unresolved: number }`; `restoreText(text: string, map: Readonly<Record<string, string>>, stats: RestoreStats, json?: boolean): string`; `restoreCompletion(completion: unknown, map: Readonly<Record<string, string>>, stats: RestoreStats): void`.
+  - `test/helpers.ts`: `withCardsRemoved(text: string): string` (a corpus text as restore gives it back: card numbers stay `[CARD REMOVED]`).
 
 - [ ] **Step 1: Write the failing tests**
+
+Create `services/gateway/test/helpers.ts` (Task A4 adds the gateway set-up to this file):
+
+```ts
+/**
+ * Shared test helpers.
+ */
+import { KNOWN_VALUES } from "../../../scripts/synthetic-corpus.ts";
+import { CARD_REMOVED } from "../src/privacy/mask.ts";
+
+/** A corpus text as restore gives it back: card numbers stay removed. */
+export function withCardsRemoved(text: string): string {
+  let out = text;
+  for (const k of KNOWN_VALUES) if (k.type === "CREDIT_CARD") out = out.replaceAll(k.value, CARD_REMOVED);
+  return out;
+}
+```
 
 Append to `services/gateway/test/privacy.test.ts`. Add these imports at the top of the file, below the existing imports:
 
 ```ts
 import { CORPUS, KNOWN_VALUES } from "../../../scripts/synthetic-corpus.ts";
 import { stubDetect } from "../../../scripts/stub-presidio.ts";
-import { CARD_REMOVED, Masker } from "../src/privacy/mask.ts";
+import { Masker } from "../src/privacy/mask.ts";
 import { postProcess } from "../src/privacy/presidio.ts";
 import { restoreCompletion, restoreText } from "../src/privacy/restore.ts";
+import { withCardsRemoved } from "./helpers.ts";
 ```
 
 Then append at the end of the file:
@@ -963,12 +983,6 @@ function detect(text: string) {
   const found = stubDetect(text, HEALTH_TERMS).map((f) => ({ type: f.entity_type, start: f.start, end: f.end, score: f.score }));
   return postProcess(text, found);
 }
-
-const cardsRemoved = (text: string): string => {
-  let out = text;
-  for (const k of KNOWN_VALUES) if (k.type === "CREDIT_CARD") out = out.replaceAll(k.value, CARD_REMOVED);
-  return out;
-};
 
 describe("Masker", () => {
   it("numbers each type from 1, reuses a placeholder for the same value and keeps health terms", () => {
@@ -1049,7 +1063,7 @@ describe("restore", () => {
         const m = new Masker();
         const masked = m.mask(item.text, detect(item.text));
         for (const { value } of KNOWN_VALUES) assert.ok(!masked.includes(value), `${value} is still in the masked text`);
-        assert.equal(restoreText(masked, m.map, { unresolved: 0 }), cardsRemoved(item.text));
+        assert.equal(restoreText(masked, m.map, { unresolved: 0 }), withCardsRemoved(item.text));
       });
     }
   });
@@ -1059,7 +1073,7 @@ describe("restore", () => {
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `node --test services/gateway/test/privacy.test.ts`
-Expected: FAIL with `ERR_MODULE_NOT_FOUND` for `../src/privacy/mask.ts`.
+Expected: FAIL with `ERR_MODULE_NOT_FOUND` for `../src/privacy/mask.ts` (imported by the test and by `helpers.ts`).
 
 - [ ] **Step 3: Write the implementation**
 
@@ -1181,7 +1195,7 @@ Expected: PASS (14 earlier tests + 4 Masker + 4 restore + 13 round-trip = 35), 0
 - [ ] **Step 5: Commit**
 
 ```bash
-git add services/gateway/src/privacy/mask.ts services/gateway/src/privacy/restore.ts services/gateway/test/privacy.test.ts
+git add services/gateway/src/privacy/mask.ts services/gateway/src/privacy/restore.ts services/gateway/test/helpers.ts services/gateway/test/privacy.test.ts
 git commit -m "feat(privacy): placeholder masking, card removal and JSON-safe restore" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
@@ -1194,7 +1208,7 @@ git commit -m "feat(privacy): placeholder masking, card removal and JSON-safe re
 - Modify: `services/gateway/src/server.ts` (replace the whole file)
 - Modify: `services/gateway/src/ledger.ts` (replace the whole file)
 - Modify: `services/gateway/src/main.ts` (replace the whole file)
-- Create: `services/gateway/test/helpers.ts`
+- Modify: `services/gateway/test/helpers.ts` (replace the whole file; Task A3's `withCardsRemoved` stays)
 - Test: `services/gateway/test/scan-mask.test.ts`
 - Modify: `services/gateway/test/gateway.test.ts` (new `createGateway` signature; stub Presidio; drop the retired agentic-profile test)
 - Modify: `README.md`, `DEMO.md`
@@ -1205,28 +1219,37 @@ git commit -m "feat(privacy): placeholder masking, card removal and JSON-safe re
   - `errors.ts`: `class HttpError extends Error { status: number; headers: Record<string, string>; constructor(status: number, message: string, headers?: Record<string, string>) }`.
   - `server.ts`: `MAX_TEXT_CHARS = 20_000`; `type GatewayDeps = { engine: Engine; pool: Pool; ledger: Ledger; presidio: PresidioClient }` (Task C9 replaces `engine`); `createGateway(deps: GatewayDeps, opts: ServerOptions): Server`.
   - `ledger.ts`: `type PrivacyEntry` and `type LedgerEntry = RoutedEntry | PrivacyEntry`.
-  - `test/helpers.ts`: `listen(server: Server): Promise<string>`; `type TestGateway = { url: string; server: Server; presidio: PresidioClient; ledgerDir: string; close(): Promise<void> }`; `startTestGateway(opts: { presidioUrl: string; gatewayKey?: string }): Promise<TestGateway>`; `post(url: string, body: unknown, headers?: Record<string, string>): Promise<Response>`; `ledgerText(dir: string): string`.
+  - `test/helpers.ts` (keeps `withCardsRemoved` from Task A3): `listen(server: Server): Promise<string>`; `closeServer(server: Server): Promise<void>`; `type TestGateway = { url: string; server: Server; presidio: PresidioClient; ledgerDir: string; close(): Promise<void> }`; `startTestGateway(opts: { presidioUrl: string; gatewayKey?: string }): Promise<TestGateway>`; `post(url: string, body: unknown, headers?: Record<string, string>): Promise<Response>`; `ledgerText(dir: string): string`.
 
 - [ ] **Step 1: Write the shared test helpers**
 
-Create `services/gateway/test/helpers.ts`:
+Replace `services/gateway/test/helpers.ts` (it keeps Task A3's `withCardsRemoved`):
 
 ```ts
 /**
- * Shared test set-up: a gateway on a loopback port, talking to the stub
- * Presidio, with its own temporary ledger directory.
+ * Shared test helpers: corpus expectations, and a gateway on a loopback
+ * port talking to the stub Presidio, with its own temporary ledger directory.
  */
 import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { KNOWN_VALUES } from "../../../scripts/synthetic-corpus.ts";
 import { loadCatalog } from "../src/catalog.ts";
 import { Engine } from "../src/engine.ts";
 import { Ledger } from "../src/ledger.ts";
 import { Pool } from "../src/pool.ts";
+import { CARD_REMOVED } from "../src/privacy/mask.ts";
 import { PresidioClient } from "../src/privacy/presidio.ts";
 import { createGateway } from "../src/server.ts";
+
+/** A corpus text as restore gives it back: card numbers stay removed. */
+export function withCardsRemoved(text: string): string {
+  let out = text;
+  for (const k of KNOWN_VALUES) if (k.type === "CREDIT_CARD") out = out.replaceAll(k.value, CARD_REMOVED);
+  return out;
+}
 
 export type TestGateway = { url: string; server: Server; presidio: PresidioClient; ledgerDir: string; close: () => Promise<void> };
 
@@ -1285,15 +1308,8 @@ import assert from "node:assert/strict";
 import { after, afterEach, before, describe, it } from "node:test";
 import { startStubPresidio, type StubPresidio } from "../../../scripts/stub-presidio.ts";
 import { CORPUS, KNOWN_VALUES } from "../../../scripts/synthetic-corpus.ts";
-import { CARD_REMOVED } from "../src/privacy/mask.ts";
 import { restoreText } from "../src/privacy/restore.ts";
-import { ledgerText, post, startTestGateway, type TestGateway } from "./helpers.ts";
-
-const cardsRemoved = (text: string): string => {
-  let out = text;
-  for (const k of KNOWN_VALUES) if (k.type === "CREDIT_CARD") out = out.replaceAll(k.value, CARD_REMOVED);
-  return out;
-};
+import { ledgerText, post, startTestGateway, withCardsRemoved, type TestGateway } from "./helpers.ts";
 
 describe("scan and mask", () => {
   let stub: StubPresidio;
@@ -1325,7 +1341,7 @@ describe("scan and mask", () => {
     it(`mask hides every value in ${item.id} and restores exactly`, async () => {
       const j = await (await post(`${g.url}/v1/privacy/mask`, { text: item.text })).json();
       for (const { value } of KNOWN_VALUES) assert.ok(!j.maskedText.includes(value), `${value} leaked`);
-      assert.equal(restoreText(j.maskedText, j.map, { unresolved: 0 }), cardsRemoved(item.text));
+      assert.equal(restoreText(j.maskedText, j.map, { unresolved: 0 }), withCardsRemoved(item.text));
     });
   }
 
