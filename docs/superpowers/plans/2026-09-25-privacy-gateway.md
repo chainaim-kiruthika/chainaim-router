@@ -28,7 +28,7 @@ Every task's requirements include this section. Values are copied from the spec.
 - Every refusal has status 400 or above, so the payment is not settled. The gateway never returns 402.
 - Tests, examples and Bazaar metadata use synthetic data only (`scripts/synthetic-corpus.ts`).
 - Tests use real sockets on `127.0.0.1` port 0 and close every server in `after` hooks.
-- End every commit message with the trailer `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (pass it as a second `-m`).
+- End every commit message with a `Co-Authored-By:` trailer (pass it as a second `-m`): the attribution line your own environment gives you, or else `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` as the commands in this plan show.
 
 ## Verification items (state on 2026-09-25)
 
