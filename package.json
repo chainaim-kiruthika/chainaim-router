@@ -11,6 +11,7 @@
     "gateway": "node services/gateway/src/main.ts",
     "test": "node --test \"services/gateway/test/*.test.ts\"",
     "test:engine": "npm --prefix packages/route-engine run check",
+    "test:paywall": "npm --prefix services/paywall test",
     "smoke": "node scripts/smoke.ts",
     "stub-models": "node scripts/stub-models.ts",
     "stub-presidio": "node scripts/stub-presidio.ts",
