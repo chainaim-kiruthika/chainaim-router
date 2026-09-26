@@ -105,7 +105,7 @@ export function parseJevAnswers(body: unknown): JevAnswer | undefined {
   if (!Number.isInteger(index) || index < 0 || index > 4) return undefined;
 
   const health = answers.health?.noul;
-  if (typeof health !== "number" || health < 0 || health > 1) return undefined;
+  if (typeof health !== "number" || !Number.isFinite(health) || health < 0 || health > 1) return undefined;
 
   return { task: choice as Task, difficulty: index + 1, health, probabilities: { task: taskProbs ?? {}, difficulty: difficultyProbs ?? {}, health } };
 }

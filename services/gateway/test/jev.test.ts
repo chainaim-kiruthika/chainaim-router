@@ -34,9 +34,10 @@ describe("parseJevAnswers", () => {
     assert.equal(parseJevAnswers(answers({ difficulty: { type: "score", probabilities: { trivial: 0.1, hard: 0.9 } } }))?.difficulty, 4);
   });
 
-  it("rejects an unknown task, a missing health answer and an out-of-range difficulty", () => {
+  it("rejects an unknown task, a missing or non-finite health answer and an out-of-range difficulty", () => {
     assert.equal(parseJevAnswers(answers({ task: { type: "choice", choice: "poetry" } })), undefined);
     assert.equal(parseJevAnswers(answers({ health: undefined })), undefined);
+    assert.equal(parseJevAnswers(answers({ health: { type: "noul", noul: Number.NaN } })), undefined);
     assert.equal(parseJevAnswers(answers({ difficulty: { type: "score", score: 7 } })), undefined);
     assert.equal(parseJevAnswers({}), undefined);
   });
