@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node src/main.ts",
-    "test": "node --test --test-force-exit \"test/*.test.ts\""
+    "test": "node --test --test-force-exit \"test/*.test.ts\"",
+    "pay": "node scripts/pay.ts"
   },
   "dependencies": {
     "@hono/node-server": "2.1.1",
@@ -18,5 +19,9 @@
     "@x402/core": "2.27.0",
     "@x402/hono": "2.27.0",
     "hono": "4.13.9"
+  },
+  "devDependencies": {
+    "@algorandfoundation/algokit-utils": "10.0.0-alpha.42",
+    "@x402/fetch": "2.27.0"
   }
 }
