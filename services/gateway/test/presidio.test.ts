@@ -7,6 +7,8 @@ import { after, afterEach, before, describe, it } from "node:test";
 import { startStubPresidio, type StubPresidio } from "../../../scripts/stub-presidio.ts";
 import { AD_HOC_RECOGNIZERS, DETECTED_ENTITIES } from "../src/privacy/entities.ts";
 import { PresidioClient, PresidioError, postProcess, resolveOverlaps, waitForPresidio } from "../src/privacy/presidio.ts";
+import { CORPUS, KNOWN_VALUES } from "../../../scripts/synthetic-corpus.ts";
+import { verifyPresidio } from "../../../scripts/verify-presidio.ts";
 
 describe("resolveOverlaps", () => {
   it("keeps the longer of two overlapping spans", () => {
@@ -125,5 +127,32 @@ describe("waitForPresidio without a Presidio", () => {
   it("gives up after waitMs", async () => {
     const client = new PresidioClient({ url: "http://127.0.0.1:9", threshold: 0.4, timeoutMs: 200 });
     await assert.rejects(waitForPresidio(client, 100, 20), /did not answer/);
+  });
+});
+
+describe("scripts/verify-presidio.ts", () => {
+  let stub: StubPresidio;
+  before(async () => {
+    stub = await startStubPresidio();
+  });
+  after(() => stub.close());
+
+  it("passes against a Presidio that supports every entity and classifies the corpus", async () => {
+    const { ok, lines } = await verifyPresidio(stub.url);
+    assert.equal(ok, true, lines.join("\n"));
+    assert.equal(lines.length, CORPUS.length + 1);
+  });
+
+  it("fails when a required entity is missing, and never prints corpus text", async () => {
+    stub.mode = "missing-entities";
+    try {
+      const { ok, lines } = await verifyPresidio(stub.url);
+      assert.equal(ok, false);
+      assert.match(lines[0], /IN_AADHAAR/);
+      const printed = lines.join("\n");
+      for (const { value } of KNOWN_VALUES) assert.ok(!printed.includes(value), `${value} printed`);
+    } finally {
+      stub.mode = "ok";
+    }
   });
 });
