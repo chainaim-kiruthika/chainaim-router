@@ -56,7 +56,7 @@ export const STUB_MODELS: readonly unknown[] = [
   { ...freeModel("stub/paid-model", 8192, 1024, ["max_tokens"]), pricing: { prompt: "0.000001", completion: "0.000002" } },
 ];
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms).unref()); // a slow answer nobody waits for must not keep a process alive
 const error = (code: number, message: string, metadata: Record<string, unknown> = {}) => ({ error: { code, message, metadata } });
 
 function json(res: ServerResponse, status: number, body: unknown): void {
