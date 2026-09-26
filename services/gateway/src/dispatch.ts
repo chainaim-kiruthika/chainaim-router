@@ -6,6 +6,7 @@
 import type { Deployment } from "./catalog.ts";
 import type { ChatRequest } from "./engine.ts";
 import type { HealthEffect, Pool } from "./pool.ts";
+import { categorize, type DataCollection, type Outcome } from "./openrouter.ts";
 
 export type Attempt = {
   model: string;
@@ -85,4 +86,80 @@ export async function dispatch(
     }
   }
   return { ok: false, attempts, status: lastStatus, message: lastMessage };
+}
+
+/** One try of one model, as the ledger records it (never an error body). */
+export type ModelAttempt = { model: string; outcome: Outcome; status?: number; ms: number };
+export type AttemptResult = { attempt: ModelAttempt; completion?: Record<string, unknown>; accountScope?: "minute" | "day" };
+
+/** What an outcome says about the deployment's health (spec section 7 and plan refinement 4). */
+function healthEffect(outcome: Outcome, status: number | undefined): HealthEffect {
+  if (outcome === "ok") return "ok";
+  if (outcome === "rate_limited_provider") return "cooldown";
+  if (outcome === "upstream_error") return status === undefined || status >= 500 || status === 408 || (status >= 200 && status < 300) ? "cooldown" : "neutral";
+  if (outcome === "timeout" || outcome === "network_error") return "fail";
+  return "neutral"; // account limits, a rejected key, the data policy, a client abort: not this model's health
+}
+
+/** A 2xx body counts only when it is a chat completion with at least one choice. */
+function parseCompletion(text: string): Record<string, unknown> | undefined {
+  try {
+    const j = JSON.parse(text) as unknown;
+    const choices = (j as { choices?: unknown } | null)?.choices;
+    if (typeof j === "object" && j !== null && !Array.isArray(j) && Array.isArray(choices) && choices.length > 0) return j as Record<string, unknown>;
+  } catch {
+    // not JSON
+  }
+  return undefined;
+}
+
+/**
+ * One attempt: send the masked body to one model's deployment with the data
+ * policy, wait for the whole answer (upstream calls are never streamed), and
+ * sort the result into an outcome. Health is updated here; the quota and the
+ * deny-unavailable cache belong to the caller.
+ */
+export async function attemptChat(
+  model: string,
+  body: Record<string, unknown>,
+  dataCollection: DataCollection,
+  pool: Pool,
+  timeoutMs: number,
+  clientSignal: AbortSignal,
+): Promise<AttemptResult> {
+  const lease = pool.acquire(model);
+  if (!lease) return { attempt: { model, outcome: "no_deployment", ms: 0 } };
+  const { deployment, release } = lease;
+  const started = performance.now();
+  const finish = (outcome: Outcome, status?: number, extra: Partial<AttemptResult> = {}): AttemptResult => {
+    release(healthEffect(outcome, status), status === undefined ? outcome : `${outcome} (HTTP ${status})`);
+    const attempt: ModelAttempt = { model, outcome, ...(status === undefined ? {} : { status }), ms: Math.round(performance.now() - started) };
+    return { attempt, ...extra };
+  };
+
+  const headers: Record<string, string> = { "content-type": "application/json", accept: "application/json" };
+  const key = pool.apiKeyFor(deployment);
+  if (key) headers.authorization = `Bearer ${key}`;
+  const timeout = AbortSignal.timeout(timeoutMs);
+  let status: number;
+  let text: string;
+  try {
+    const res = await fetch(`${deployment.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ ...body, model: deployment.servedModel, stream: false, provider: { data_collection: dataCollection } }),
+      signal: AbortSignal.any([clientSignal, timeout]),
+    });
+    status = res.status;
+    text = await res.text();
+  } catch {
+    if (clientSignal.aborted) return finish("client_abort");
+    return finish(timeout.aborted ? "timeout" : "network_error");
+  }
+
+  const { outcome, accountScope } = categorize(status, text, dataCollection);
+  if (outcome !== "ok") return finish(outcome, status, accountScope ? { accountScope } : {});
+  const completion = parseCompletion(text);
+  if (!completion) return finish("upstream_error", status);
+  return finish("ok", status, { completion });
 }

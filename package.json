@@ -15,6 +15,7 @@
     "smoke": "node scripts/smoke.ts",
     "stub-models": "node scripts/stub-models.ts",
     "stub-presidio": "node scripts/stub-presidio.ts",
+    "stub-openrouter": "node scripts/stub-openrouter.ts",
     "verify:presidio": "node scripts/verify-presidio.ts",
     "models:start": "scripts/serve-local-models.sh",
     "models:stop": "scripts/serve-local-models.sh --stop",
