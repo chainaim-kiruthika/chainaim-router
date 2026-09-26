@@ -18,6 +18,8 @@ export class Quota {
   private dailyPaused = false;
   private keyRejected = false;
   private timer: NodeJS.Timeout | undefined;
+  private reading: Promise<void> | undefined;
+  private readAgain = false;
 
   constructor(opts: QuotaOptions) {
     this.opts = opts;
@@ -73,8 +75,32 @@ export class Quota {
     void this.refresh();
   }
 
-  /** Read the key's free-model allowance (GET /api/v1/key). Failures keep the last known values. */
-  async refresh(): Promise<void> {
+  /**
+   * Read the key's free-model allowance (GET /api/v1/key). Reads never
+   * overlap: a call during a read asks for one more read after it, so a burst
+   * of 429s costs at most two reads and the last result is never older than
+   * the last call. Never rejects.
+   */
+  refresh(): Promise<void> {
+    if (this.reading) {
+      this.readAgain = true;
+      return this.reading;
+    }
+    this.reading = (async () => {
+      try {
+        do {
+          this.readAgain = false;
+          await this.readKey();
+        } while (this.readAgain);
+      } finally {
+        this.reading = undefined;
+      }
+    })();
+    return this.reading;
+  }
+
+  /** One key read. Failures keep the last known values. */
+  private async readKey(): Promise<void> {
     if (!this.opts.keyUrl || !this.opts.apiKey) return;
     let res: Response;
     try {
@@ -83,12 +109,12 @@ export class Quota {
       return;
     }
     if (res.status === 401 || res.status === 403) {
-      await res.body?.cancel();
+      await res.body?.cancel().catch(() => undefined); // cancel() rejects when the stream already failed
       this.keyRejected = true;
       return;
     }
     if (!res.ok) {
-      await res.body?.cancel();
+      await res.body?.cancel().catch(() => undefined); // cancel() rejects when the stream already failed
       return;
     }
     let body: unknown;

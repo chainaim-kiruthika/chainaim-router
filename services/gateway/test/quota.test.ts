@@ -86,6 +86,13 @@ describe("Quota", () => {
     assert.equal(q.capacity(true).chatAvailable, true);
   });
 
+  it("key reads never overlap: a burst asks for one more read, not one each", async () => {
+    const q = withKey(clock());
+    const reads = or.keyReads;
+    await Promise.all([q.refresh(), q.refresh(), q.refresh()]);
+    assert.equal(or.keyReads - reads, 2);
+  });
+
   it("without a key reader (catalog mode) a rejected key does not latch", () => {
     const q = new Quota({ rpm: 20, keyIntervalMs: 0 });
     q.onKeyRejected();
