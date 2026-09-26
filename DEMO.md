@@ -352,13 +352,6 @@ request. Stop Terminals 3 and 4 with Ctrl+C when you're done.
 | `npm run stub-models` exits with `EADDRINUSE` | Something already uses port 8081 or 8082, such as llama.cpp started by `serve-local-models.ps1` | `.\scripts\serve-local-models.ps1 -Stop`, or close that terminal |
 | Garbled characters such as `Â²`, or `request body is not valid JSON` from a hand-typed `curl.exe` | Windows PowerShell 5.1 mis-decodes UTF-8 and mangles JSON arguments and piped input | Use the helpers, which handle both (see the comment at the top of `scripts/demo.ps1`) |
 
-## Known issues (as of 2026-09-22)
-
-Delete each line once it's fixed.
-
-- `--cooldown-ms` has no effect. A failed deployment comes back only when a health check
-  passes, and with `--health-interval-ms 0` it never comes back until the gateway restarts.
-
 ## Reference
 
 - `.\scripts\demo.ps1 <Command> [arguments] [-Gateway URL]`, targeting `http://127.0.0.1:8700` by default:

@@ -124,13 +124,14 @@ async function main(): Promise<void> {
 
   const catalog = loadCatalog(f.catalog);
   const engine = new Engine(catalog, { strategy: f.strategy, defaultProfile: f.defaultProfile, defaultMaxTokens: f.defaultMaxTokens });
-  const pool = new Pool(catalog, {
+  const pool = new Pool({
     healthIntervalMs: f.healthIntervalMs,
     healthTimeoutMs: f.healthTimeoutMs,
     unhealthyAfter: f.unhealthyAfter,
     cooldownMs: f.cooldownMs,
     env: process.env,
   });
+  pool.setModels(catalog.models);
   const ledger = new Ledger(f.ledgerDir);
   await pool.checkAll();
   pool.start();

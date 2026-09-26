@@ -5,7 +5,7 @@
  */
 import type { Deployment } from "./catalog.ts";
 import type { ChatRequest } from "./engine.ts";
-import type { Pool } from "./pool.ts";
+import type { HealthEffect, Pool } from "./pool.ts";
 
 export type Attempt = {
   model: string;
@@ -19,7 +19,7 @@ export type Attempt = {
 export type DispatchOptions = { maxAttempts: number; attemptTimeoutMs: number };
 
 export type DispatchResult =
-  | { ok: true; response: Response; model: string; deployment: Deployment; attempts: Attempt[]; done: (ok: boolean, error?: string) => void }
+  | { ok: true; response: Response; model: string; deployment: Deployment; attempts: Attempt[]; done: (effect: HealthEffect, error?: string) => void }
   | { ok: false; attempts: Attempt[]; status: number; message: string };
 
 /** Build the upstream request for an OpenAI-compatible deployment. */
@@ -65,21 +65,21 @@ export async function dispatch(
       attempts.push({ model, deployment: deployment.id, status: response.status, ms, outcome: "http_error", error: text });
       // 4xx other than 408/429 is about the request, not the deployment's health.
       const deploymentFault = response.status >= 500 || response.status === 408 || response.status === 429;
-      release(!deploymentFault, `HTTP ${response.status}`);
+      release(deploymentFault ? "fail" : "ok", `HTTP ${response.status}`);
       lastStatus = response.status;
       lastMessage = `upstream ${deployment.id} returned HTTP ${response.status}`;
     } catch (e) {
       clearTimeout(timer);
       const ms = Math.round(performance.now() - started);
       if (clientSignal.aborted) {
-        release(true);
+        release("neutral");
         attempts.push({ model, deployment: deployment.id, ms, outcome: "client_abort" });
         return { ok: false, attempts, status: 499, message: "client closed the request" };
       }
       const timedOut = timeout.signal.aborted;
       const error = timedOut ? String(timeout.signal.reason?.message ?? "timeout") : `${(e as Error).name}: ${(e as Error).message}`;
       attempts.push({ model, deployment: deployment.id, ms, outcome: timedOut ? "timeout" : "network_error", error });
-      release(false, error);
+      release("fail", error);
       lastStatus = timedOut ? 504 : 502;
       lastMessage = `upstream ${deployment.id}: ${error}`;
     }

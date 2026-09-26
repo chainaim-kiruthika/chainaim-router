@@ -42,10 +42,12 @@ export async function startTestGateway(opts: { presidioUrl: string; gatewayKey?:
   const presidio = new PresidioClient({ url: opts.presidioUrl, threshold: 0.4, timeoutMs: 2000 });
   await presidio.checkHealth();
   const ledgerDir = mkdtempSync(join(tmpdir(), "chainaim-ledger-"));
+  const pool = new Pool({ healthIntervalMs: 0, healthTimeoutMs: 1000, unhealthyAfter: 1, cooldownMs: 60_000, env: {} });
+  pool.setModels(catalog.models);
   const server = createGateway(
     {
       engine: new Engine(catalog, { strategy: "rules", defaultProfile: "auto", defaultMaxTokens: 256 }),
-      pool: new Pool(catalog, { healthIntervalMs: 0, healthTimeoutMs: 1000, unhealthyAfter: 1, cooldownMs: 60_000, env: {} }),
+      pool,
       ledger: new Ledger(ledgerDir),
       presidio,
     },

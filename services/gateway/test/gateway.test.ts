@@ -79,7 +79,8 @@ let presidioUrl = "";
 
 async function startGateway(catalog: Catalog, extra: Partial<{ attemptTimeoutMs: number; gatewayKey: string; ledgerDir: string }> = {}) {
   const engine = new Engine(catalog, { strategy: "rules", defaultProfile: "auto", defaultMaxTokens: 256 });
-  const pool = new Pool(catalog, { healthIntervalMs: 0, healthTimeoutMs: 1000, unhealthyAfter: 1, cooldownMs: 60_000, env: {} });
+  const pool = new Pool({ healthIntervalMs: 0, healthTimeoutMs: 1000, unhealthyAfter: 1, cooldownMs: 60_000, env: {} });
+  pool.setModels(catalog.models);
   const presidio = new PresidioClient({ url: presidioUrl, threshold: 0.4, timeoutMs: 2000 });
   await presidio.checkHealth();
   const server = createGateway({ engine, pool, ledger: new Ledger(extra.ledgerDir), presidio }, {

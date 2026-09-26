@@ -32,6 +32,8 @@ export type Deployment = {
   apiKeyEnv?: string;
   /** Liveness URL. Defaults to `${baseUrl}/models`. */
   healthUrl?: string;
+  /** false = never probed (OpenRouter models): request outcomes and the cooldown are its only health signal. */
+  probe?: boolean;
 };
 
 export type ModelEntry = {
@@ -126,6 +128,7 @@ export function validateCatalog(raw: unknown): Catalog {
       if (d.healthUrl !== undefined) {
         need(typeof d.healthUrl === "string" && URL.canParse(d.healthUrl), `${dat}.healthUrl: valid URL`);
       }
+      if (d.probe !== undefined) need(typeof d.probe === "boolean", `${dat}.probe: boolean`);
     });
   });
 

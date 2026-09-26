@@ -188,7 +188,7 @@ export function createGateway(deps: GatewayDeps, opts: ServerOptions): Server {
       error = `stream: ${(e as Error).message}`;
       res.destroy();
     } finally {
-      result.done(ok, error);
+      result.done(ok ? "ok" : "fail", error);
       ledger.write({
         ...entryBase,
         served: { model: result.model, deployment: result.deployment.id },
