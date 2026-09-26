@@ -1,0 +1,37 @@
+{
+  "version": "2026-09-24",
+  "notes": "Scoring table for OpenRouter's free models (spec section 6). Quality, tasks and speed are estimates, to be tuned from ledger data. A model missing here is scored from the largest <number>b in its id.",
+  "weights": {
+    "qualityByDifficulty": [0.5, 0.75, 1.0, 1.25, 1.5],
+    "taskMatch": 2,
+    "domainMatch": 2,
+    "speedWhenEasy": { "fast": 2, "medium": 1, "slow": 0 }
+  },
+  "defaults": {
+    "qualityBySize": [[300, 8], [100, 7], [25, 6], [8, 5], [0, 3]],
+    "unknownSizeQuality": 5,
+    "speedBySize": [[100, "slow"], [25, "medium"], [0, "fast"]],
+    "unknownSizeSpeed": "medium"
+  },
+  "models": {
+    "nvidia/nemotron-3-ultra-550b-a55b:free": { "quality": 9, "tasks": ["reasoning", "code", "long_document"], "speed": "slow", "domains": [] },
+    "nvidia/nemotron-3-super-120b-a12b:free": { "quality": 8, "tasks": ["reasoning", "tool_use", "code"], "speed": "medium", "domains": [] },
+    "z-ai/glm-5.2:free": { "quality": 8, "tasks": ["reasoning", "code", "chat"], "speed": "medium", "domains": [] },
+    "thinkingmachines/inkling:free": { "quality": 8, "tasks": ["reasoning", "chat", "long_document"], "speed": "medium", "domains": [] },
+    "qwen/qwen3.8-27b:free": { "quality": 7, "tasks": ["chat", "code", "reasoning", "tool_use", "extraction"], "speed": "medium", "domains": [] },
+    "google/gemma-4-31b-it:free": { "quality": 7, "tasks": ["chat", "rewrite", "extraction"], "speed": "medium", "domains": [] },
+    "nex-agi/nex-n2.5-pro:free": { "quality": 7, "tasks": ["tool_use", "reasoning", "code"], "speed": "medium", "domains": [] },
+    "poolside/laguna-s-2.1:free": { "quality": 7, "tasks": ["code", "tool_use"], "speed": "medium", "domains": [] },
+    "google/gemma-4-26b-a4b-it:free": { "quality": 6, "tasks": ["chat", "rewrite", "extraction"], "speed": "fast", "domains": [] },
+    "dots-studio/dots-3-note-preview:free": { "quality": 6, "tasks": ["long_document", "chat"], "speed": "medium", "domains": [] },
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": { "quality": 6, "tasks": ["reasoning"], "speed": "fast", "domains": [] },
+    "nvidia/nemotron-3.5-lightning:free": { "quality": 6, "tasks": ["chat", "extraction", "long_document"], "speed": "fast", "domains": [] },
+    "thinkingmachines/inkling-small:free": { "quality": 6, "tasks": ["chat", "rewrite", "long_document"], "speed": "fast", "domains": [] },
+    "inclusionai/ling-3.0-flash-sante:free": { "quality": 5, "tasks": ["chat", "extraction"], "speed": "fast", "domains": ["health"] },
+    "inclusionai/ling-3.0-flash-fin:free": { "quality": 5, "tasks": ["extraction", "chat"], "speed": "fast", "domains": [] },
+    "cohere/north-mini-code:free": { "quality": 5, "tasks": ["code"], "speed": "fast", "domains": [] },
+    "nex-agi/nex-n2.5-mini:free": { "quality": 5, "tasks": ["tool_use", "chat"], "speed": "fast", "domains": [] },
+    "poolside/laguna-xs-2.1:free": { "quality": 5, "tasks": ["code"], "speed": "fast", "domains": [] },
+    "liquid/lfm-2.5-2.6b:free": { "quality": 3, "tasks": ["chat", "extraction", "rewrite"], "speed": "fast", "domains": [] }
+  }
+}
