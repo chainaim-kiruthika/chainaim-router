@@ -63,4 +63,4 @@ Create a free UptimeRobot HTTP monitor on `https://<domain>/healthz` every 5 min
 
 ## 7. When chat launches
 
-Add `OPENROUTER_API_KEY` to the gateway, buy $10 of OpenRouter credits (1,000 free-model requests a day), and redeploy the gateway. From Task C10 on its image runs with `--model-source openrouter-free`.
+The gateway image runs with `--model-source openrouter-free`. Until `OPENROUTER_API_KEY` is set on the gateway, chat reports no capacity and the paywall refuses chat calls without charging; scan and mask are unaffected. To launch chat: buy $10 of OpenRouter credits (1,000 free-model requests a day), add `OPENROUTER_API_KEY` to the gateway, redeploy it, and run `npm run verify:openrouter` from your PC with the same key (V1, V2 and V5). Then make one real MainNet payment on chat.

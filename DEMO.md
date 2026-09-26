@@ -1,5 +1,7 @@
 # Demo runbook: ChainAim gateway on Windows
 
+> **Iteration 0 runbook.** This describes the routing-profile demo over two local models. Since the privacy gateway (September 2026), chat always masks first and routes across OpenRouter's free models; `chainaim/eco` and `chainaim/premium` are retired, and the profile steps below no longer apply. For the current system see `README.md`.
+
 Use this every time you run or present the gateway demo on this machine.
 Setup (Steps 1 to 3) takes about 2 minutes.
 
