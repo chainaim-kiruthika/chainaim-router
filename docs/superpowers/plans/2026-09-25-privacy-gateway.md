@@ -5900,7 +5900,7 @@ describe("conversation masking", () => {
   });
 
   it("launch gate 2 for tool-call arguments: masking then restoring gives the same JSON", () => {
-    const args = JSON.stringify({ patient: 'Jane "JR" Roe', file: "C:\records\991122.txt" });
+    const args = JSON.stringify({ patient: 'Jane "JR" Roe', file: "C:\\records\\991122.txt" });
     const masker = new Masker();
     const [m] = mapConversation([{ role: "assistant", tool_calls: [{ type: "function", function: { name: "open", arguments: args } }] }], (text, context) =>
       masker.mask(text, withinValue(text, detect(context + text), context.length)),
@@ -6252,13 +6252,13 @@ describe("launch gate: nothing identifying leaves, masking round-trips, the ledg
 
   it("masks tool-call arguments value by value and restores the model's tool call as valid JSON", async () => {
     const before = or.chatBodies.length;
-    const args = JSON.stringify({ patient: 'Jane "JR" Roe', file: "C:\records\991122.txt", phone: "+1 415 555 0132" });
+    const args = JSON.stringify({ patient: 'Jane "JR" Roe', file: "C:\\records\\991122.txt", phone: "+1 415 555 0132" });
     const r = await chat(g, {
       messages: [
         { role: "user", content: "Open the chart for Jane Roe." },
         { role: "assistant", content: null, tool_calls: [{ id: "call_0", type: "function", function: { name: "open_chart", arguments: args } }] },
         { role: "tool", tool_call_id: "call_0", content: "Chart for Jane Roe (MRN 991122) opened." },
-        { role: "user", content: 'call lookup for Jane "JR" Roe at C:\records\991122.txt' },
+        { role: "user", content: 'call lookup for Jane "JR" Roe at C:\\records\\991122.txt' },
       ],
       tools: [{ type: "function", function: { name: "lookup", parameters: { type: "object", properties: { query: { type: "string" } } } } }],
     });
@@ -6266,9 +6266,9 @@ describe("launch gate: nothing identifying leaves, masking round-trips, the ledg
     const sent = or.chatBodies.slice(before);
     assert.deepEqual(leaked(JSON.stringify(sent)), []);
     const history = sent[0].messages as { tool_calls?: { function: { arguments: string } }[] }[];
-    assert.deepEqual(JSON.parse(history[1].tool_calls![0].function.arguments), { patient: "<PERSON_2>", file: "C:\records\<MEDICAL_RECORD_1>.txt", phone: "<PHONE_NUMBER_1>" });
+    assert.deepEqual(JSON.parse(history[1].tool_calls![0].function.arguments), { patient: "<PERSON_2>", file: "C:\\records\\<MEDICAL_RECORD_1>.txt", phone: "<PHONE_NUMBER_1>" });
     const call = (await r.json()).choices[0].message.tool_calls[0];
-    assert.equal(JSON.parse(call.function.arguments).query, 'call lookup for Jane "JR" Roe at C:\records\991122.txt');
+    assert.equal(JSON.parse(call.function.arguments).query, 'call lookup for Jane "JR" Roe at C:\\records\\991122.txt');
   });
 
   it("keeps every identifier, placeholder and the map out of the ledger", () => {
