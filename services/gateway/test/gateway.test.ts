@@ -1,33 +1,26 @@
 /**
- * Gateway tests. Upstreams are real HTTP servers on loopback ports that
- * behave like OpenAI-compatible model servers (healthy, failing, slow), so
- * fallback, health and streaming are exercised over real sockets.
+ * Gateway tests in catalog mode: upstreams are real HTTP servers on loopback
+ * ports that behave like OpenAI-compatible model servers (healthy, failing,
+ * slow), so fallback, cooldown, the key and the ledger run over real sockets.
+ * Chat always runs the privacy pipeline (the stub Presidio); Jev is off, so
+ * the rules classify.
  */
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
-import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { CatalogError, loadCatalog, validateCatalog, type Catalog } from "../src/catalog.ts";
-import { Engine, extractFeatures, RequestError } from "../src/engine.ts";
-import { Ledger } from "../src/ledger.ts";
-import { Pool } from "../src/pool.ts";
-import { createGateway } from "../src/server.ts";
 import { startStubPresidio, type StubPresidio } from "../../../scripts/stub-presidio.ts";
-import { PresidioClient } from "../src/privacy/presidio.ts";
+import { CatalogError, validateCatalog, type Catalog } from "../src/catalog.ts";
+import { parseFlags } from "../src/main.ts";
+import { closeServer, ledgerText, listen, post, startTestGateway } from "./helpers.ts";
 
 type Behaviour = "ok" | "fail500" | "slow";
 
-function upstream(name: string, behaviour: Behaviour): Promise<{ server: Server; url: string; hits: () => number }> {
-  let hits = 0;
+async function upstream(name: string, behaviour: Behaviour): Promise<{ server: Server; url: string }> {
   const server = createServer(async (req, res) => {
     if (req.url === "/health") {
       res.writeHead(behaviour === "fail500" ? 503 : 200).end("{}");
       return;
     }
-    hits++;
     let raw = "";
     for await (const c of req) raw += c;
     const body = JSON.parse(raw);
@@ -36,284 +29,153 @@ function upstream(name: string, behaviour: Behaviour): Promise<{ server: Server;
       return;
     }
     if (behaviour === "slow") await new Promise((r) => setTimeout(r, 400));
-    if (body.stream) {
-      res.writeHead(200, { "content-type": "text/event-stream" });
-      res.write(`data: {"choices":[{"delta":{"content":"hi from ${name}"}}]}\n\n`);
-      res.end("data: [DONE]\n\n");
-      return;
-    }
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ model: body.model, choices: [{ message: { role: "assistant", content: `hi from ${name}` } }] }));
   });
-  return new Promise((resolve) =>
-    server.listen(0, "127.0.0.1", () => {
-      const port = (server.address() as AddressInfo).port;
-      resolve({ server, url: `http://127.0.0.1:${port}`, hits: () => hits });
-    }),
-  );
+  return { server, url: await listen(server) };
 }
 
-const caps = { contextWindow: 8192, maxOutputTokens: 2048, supportsTools: false, supportsVision: false };
+const caps = { contextWindow: 8192, maxOutputTokens: 2048, supportsTools: true, supportsVision: false };
 const chains = (order: string[]) => ({ SIMPLE: order, MEDIUM: order, COMPLEX: order, REASONING: order });
+const profiles = (ids: string[]) => ({ auto: chains(ids), eco: chains(ids), premium: chains(ids) });
 
-/** @param agentic tier chains for tool-bearing turns; omit to leave agentic routing off */
-function catalogFor(small: string[], large: string[], agentic?: string[]): Catalog {
+function catalogFor(small: string[], large: string[]): Catalog {
+  const deployments = (name: string, urls: string[]) =>
+    urls.map((u, i) => ({ id: `${name}@${i}`, adapter: "openai", baseUrl: `${u}/v1`, servedModel: name, healthUrl: `${u}/health` }));
   return validateCatalog({
     version: "test",
     models: [
-      { id: "local/small", zone: "local", capabilities: { ...caps, supportsTools: true }, pricing: { inputPerM: 0.01, outputPerM: 0.02 },
-        deployments: small.map((u, i) => ({ id: `small@${i}`, adapter: "openai", baseUrl: `${u}/v1`, servedModel: "small", healthUrl: `${u}/health` })) },
-      { id: "local/large", zone: "local", capabilities: { ...caps, supportsTools: true }, pricing: { inputPerM: 0.1, outputPerM: 0.2 },
-        deployments: large.map((u, i) => ({ id: `large@${i}`, adapter: "openai", baseUrl: `${u}/v1`, servedModel: "large", healthUrl: `${u}/health` })) },
+      { id: "local/small", zone: "local", capabilities: caps, pricing: { inputPerM: 0.01, outputPerM: 0.02 }, deployments: deployments("small", small) },
+      { id: "local/large", zone: "local", capabilities: caps, pricing: { inputPerM: 0.1, outputPerM: 0.2 }, deployments: deployments("large", large) },
     ],
-    profiles: { auto: chains(["local/small", "local/large"]), eco: chains(["local/small", "local/large"]), premium: chains(["local/large", "local/small"]) },
-    ...(agentic ? { agentic: chains(agentic) } : {}),
+    profiles: profiles(["local/small", "local/large"]),
   });
 }
-
-const TOOLS = [{ type: "function", function: { name: "cancel_order" } }];
-const AGENT_PROMPT = "Cancel order B-42 and book the 9am flight to SFO.";
-
-/** Set by the socket suite's before(); every gateway uses the stub Presidio. */
-let presidioUrl = "";
-
-async function startGateway(catalog: Catalog, extra: Partial<{ attemptTimeoutMs: number; gatewayKey: string; ledgerDir: string }> = {}) {
-  const engine = new Engine(catalog, { strategy: "rules", defaultProfile: "auto", defaultMaxTokens: 256 });
-  const pool = new Pool({ healthIntervalMs: 0, healthTimeoutMs: 1000, unhealthyAfter: 1, cooldownMs: 60_000, env: {} });
-  pool.setModels(catalog.models);
-  const presidio = new PresidioClient({ url: presidioUrl, threshold: 0.4, timeoutMs: 2000 });
-  await presidio.checkHealth();
-  const server = createGateway({ engine, pool, ledger: new Ledger(extra.ledgerDir), presidio }, {
-    maxAttempts: 3, attemptTimeoutMs: extra.attemptTimeoutMs ?? 5000, maxBodyBytes: 1 << 20, gatewayKey: extra.gatewayKey,
-  });
-  await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
-  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  return { server, pool, url };
-}
-
-const post = (url: string, body: unknown, headers: Record<string, string> = {}) =>
-  fetch(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
 
 describe("catalog validation", () => {
+  const one = (deployment: Record<string, unknown>, id = "local/a") => ({
+    version: "x",
+    models: [{ id, zone: "local", capabilities: caps, pricing: { inputPerM: 0, outputPerM: 0 }, deployments: [{ id: "a", adapter: "openai", baseUrl: "http://127.0.0.1:1/v1", servedModel: "a", ...deployment }] }],
+    profiles: profiles([id]),
+  });
+
   it("rejects an unknown model id in a profile chain", () => {
-    const bad = { version: "x", models: [{ id: "local/a", zone: "local", capabilities: caps, pricing: { inputPerM: 0, outputPerM: 0 },
-      deployments: [{ id: "a", adapter: "openai", baseUrl: "http://127.0.0.1:1/v1", servedModel: "a" }] }],
-      profiles: { auto: chains(["local/nope"]), eco: chains(["local/a"]), premium: chains(["local/a"]) } };
-    assert.throws(() => validateCatalog(bad), CatalogError);
+    assert.throws(() => validateCatalog({ ...one({}), profiles: { ...profiles(["local/a"]), auto: chains(["local/nope"]) } }), CatalogError);
   });
   it("rejects a secret value where an env var name is expected", () => {
-    const bad = { version: "x", models: [{ id: "local/a", zone: "local", capabilities: caps, pricing: { inputPerM: 0, outputPerM: 0 },
-      deployments: [{ id: "a", adapter: "openai", baseUrl: "http://127.0.0.1:1/v1", servedModel: "a", apiKeyEnv: "sk-live-123" }] }],
-      profiles: { auto: chains(["local/a"]), eco: chains(["local/a"]), premium: chains(["local/a"]) } };
-    assert.throws(() => validateCatalog(bad), /environment variable NAME/);
+    assert.throws(() => validateCatalog(one({ apiKeyEnv: "sk-live-123" })), /environment variable NAME/);
   });
   it("reserves the chainaim/ namespace", () => {
-    const bad = { version: "x", models: [{ id: "chainaim/auto", zone: "local", capabilities: caps, pricing: { inputPerM: 0, outputPerM: 0 },
-      deployments: [{ id: "a", adapter: "openai", baseUrl: "http://127.0.0.1:1/v1", servedModel: "a" }] }],
-      profiles: { auto: chains(["chainaim/auto"]), eco: chains(["chainaim/auto"]), premium: chains(["chainaim/auto"]) } };
-    assert.throws(() => validateCatalog(bad), /reserved/);
+    assert.throws(() => validateCatalog(one({}, "chainaim/auto")), /reserved/);
+  });
+  it("accepts probe: false and rejects a probe that is not a boolean", () => {
+    assert.equal(validateCatalog(one({ probe: false })).models[0].deployments[0].probe, false);
+    assert.throws(() => validateCatalog(one({ probe: "no" })), /probe/);
   });
 });
 
-/**
- * The shipped catalogs are the deployed artefact, so their routing is asserted
- * directly. A tool-bearing turn must not be served by the weakest model just
- * because the prompt scores SIMPLE: "cancel this order" is a stateful action.
- */
-describe("shipped catalogs route agentic work to the larger model", () => {
-  const SMALL = "local/qwen2.5-0.5b";
-  const LARGE = "local/qwen2.5-1.5b";
-  const agenticRequest = {
-    model: "chainaim/auto",
-    messages: [{ role: "user", content: "Cancel order B-42 and book the 9am flight to SFO." }],
-    tools: [
-      { type: "function", function: { name: "cancel_order" } },
-      { type: "function", function: { name: "book_flight" } },
-    ],
-  };
-
-  for (const path of ["config/catalog.json", "config/catalog.ollama.json"]) {
-    describe(path, () => {
-      const catalog = loadCatalog(path);
-
-      it("declares tool support, which both Qwen2.5 models have", () => {
-        for (const m of catalog.models) {
-          assert.equal(m.capabilities.supportsTools, true, `${m.id}.capabilities.supportsTools`);
-        }
-      });
-
-      it("routes a tool-bearing request to the larger model", () => {
-        const engine = new Engine(catalog, { strategy: "rules", defaultProfile: "auto", defaultMaxTokens: 256 });
-        const { decision } = engine.decide(agenticRequest, []);
-        assert.equal(decision.chain[0], LARGE);
-      });
-
-      it("fails closed: the agentic chain never falls back to the small model", () => {
-        const engine = new Engine(catalog, { strategy: "rules", defaultProfile: "auto", defaultMaxTokens: 256 });
-        const { decision } = engine.decide(agenticRequest, []);
-        assert.ok(!decision.chain.includes(SMALL), `chain must exclude ${SMALL}, got ${JSON.stringify(decision.chain)}`);
-      });
-
-      it("leaves ordinary prompts on the cost-optimised chains", () => {
-        const engine = new Engine(catalog, { strategy: "rules", defaultProfile: "auto", defaultMaxTokens: 256 });
-        const { decision } = engine.decide({ model: "chainaim/auto", messages: [{ role: "user", content: "What is the capital of France?" }] }, []);
-        assert.equal(decision.chain[0], SMALL);
-      });
-    });
-  }
-});
-
-describe("engine", () => {
-  const catalog = catalogFor(["http://127.0.0.1:1"], ["http://127.0.0.1:2"]);
-  const engine = new Engine(catalog, { strategy: "rules", defaultProfile: "auto", defaultMaxTokens: 256 });
-
-  it("routes a simple question to the SIMPLE chain, catalog models only", () => {
-    const { decision } = engine.decide({ model: "chainaim/auto", messages: [{ role: "user", content: "What is the capital of France?" }] }, []);
-    assert.equal(decision.tier, "SIMPLE");
-    assert.deepEqual(decision.chain, ["local/small", "local/large"]);
+describe("flags", () => {
+  it("default to catalog mode with the spec's values", () => {
+    const f = parseFlags([]);
+    assert.deepEqual(
+      [f.modelSource, f.maxOutputTokens, f.presidioThreshold, f.jev, f.jevModel, f.jevTimeoutMs, f.healthFlagThreshold, f.freeSyncIntervalMs, f.freeRpm, f.openRouterKeyEnv],
+      ["catalog", 1024, 0.4, true, "typesafe/jev-1.13", 800, 0.5, 21_600_000, 20, "OPENROUTER_API_KEY"],
+    );
   });
-  it("uses the premium chain order for chainaim/premium", () => {
-    const { decision } = engine.decide({ model: "chainaim/premium", messages: [{ role: "user", content: "hello" }] }, []);
-    assert.equal(decision.chain[0], "local/large");
-  });
-  it("pins an explicit catalog model", () => {
-    const { decision } = engine.decide({ model: "local/large", messages: [{ role: "user", content: "hi" }] }, []);
-    assert.deepEqual(decision, { mode: "pinned", chain: ["local/large"], excluded: [] });
-  });
-  it("rejects unknown models and profiles with 404", () => {
-    assert.throws(() => engine.decide({ model: "openai/gpt-x", messages: [{ role: "user", content: "hi" }] }, []), (e: unknown) => e instanceof RequestError && e.status === 404);
-    assert.throws(() => engine.decide({ model: "chainaim/cheapest", messages: [{ role: "user", content: "hi" }] }, []), (e: unknown) => e instanceof RequestError && e.status === 404);
-  });
-  it("portfolio strategy never proposes an id outside the catalog", () => {
-    const pe = new Engine(catalog, { strategy: "portfolio", defaultProfile: "auto", defaultMaxTokens: 256 });
-    const { decision } = pe.decide({ model: "chainaim/auto", messages: [{ role: "user", content: "Refactor this python function to be async and add tests" }] }, []);
-    for (const m of decision.chain) assert.ok(["local/small", "local/large"].includes(m), m);
-  });
-  it("extracts tools, vision and structured-output flags", () => {
-    const f = extractFeatures({ messages: [{ role: "user", content: [{ type: "text", text: "look" }, { type: "image_url" }] }],
-      tools: [{ type: "function", function: { name: "get_weather" } }], response_format: { type: "json_schema" } }, 100);
-    assert.equal(f.hasVision, true);
-    assert.equal(f.hasTools, true);
-    assert.deepEqual(f.toolNames, ["get_weather"]);
-    assert.equal(f.requiresStructuredOutput, true);
-    assert.equal(f.maxOutputTokens, 100);
+  it("reject an unknown model source, a threshold above 1 and a key where a variable name belongs", () => {
+    assert.throws(() => parseFlags(["--model-source", "paid"]), /model-source/);
+    assert.throws(() => parseFlags(["--presidio-threshold", "2"]), /presidio-threshold/);
+    assert.throws(() => parseFlags(["--openrouter-key-env", "sk-or-v1-abc"]), /openrouter-key-env/);
   });
 });
 
-describe("gateway over real sockets", () => {
-  const ups: Awaited<ReturnType<typeof upstream>>[] = [];
-  let stubPresidio: StubPresidio;
+describe("catalog-mode chat over real sockets", () => {
+  let presidio: StubPresidio;
+  const ups: { server: Server; url: string }[] = [];
   before(async () => {
-    stubPresidio = await startStubPresidio();
-    presidioUrl = stubPresidio.url;
+    presidio = await startStubPresidio();
     ups.push(await upstream("small-ok", "ok"), await upstream("large-ok", "ok"), await upstream("small-down", "fail500"), await upstream("slow", "slow"));
   });
   after(async () => {
-    ups.forEach((u) => u.server.close());
-    await stubPresidio.close();
+    await Promise.all(ups.map((u) => closeServer(u.server)));
+    await presidio.close();
   });
+  const start = (catalog: Catalog, extra: { attemptTimeoutMs?: number; gatewayKey?: string } = {}) => startTestGateway({ presidioUrl: presidio.url, catalog, ...extra });
+  const ask = (url: string, content: string, headers: Record<string, string> = {}) => post(`${url}/v1/chat/completions`, { messages: [{ role: "user", content }] }, headers);
 
-  it("serves from the primary and reports the decision in headers", async () => {
-    const g = await startGateway(catalogFor([ups[0].url], [ups[1].url]));
-    const r = await post(`${g.url}/v1/chat/completions`, { model: "chainaim/auto", messages: [{ role: "user", content: "What is 2+2?" }] });
+  it("serves the best-scored model and reports the decision in headers", async () => {
+    const g = await start(catalogFor([ups[0].url], [ups[1].url]));
+    const r = await ask(g.url, "What is 2+2?");
     assert.equal(r.status, 200);
     assert.equal(r.headers.get("x-chainaim-model"), "local/small");
-    assert.equal(r.headers.get("x-chainaim-tier"), "SIMPLE");
-    const j = await r.json();
-    assert.equal(j.model, "small", "upstream received the deployment's servedModel");
-    g.server.close();
+    assert.equal(r.headers.get("x-chainaim-classifier"), "rules");
+    assert.equal(r.headers.get("x-chainaim-data-class"), "none");
+    assert.equal(r.headers.get("x-chainaim-attempts"), "1");
+    assert.equal((await r.json()).model, "small", "the upstream received the deployment's servedModel");
+    await g.close();
   });
 
-  it("falls back to the next model when the primary returns 5xx", async () => {
-    const g = await startGateway(catalogFor([ups[2].url], [ups[1].url]));
-    const r = await post(`${g.url}/v1/chat/completions`, { model: "chainaim/auto", messages: [{ role: "user", content: "What is 2+2?" }] });
+  it("falls back to the next model on a 5xx and cools the first one down", async () => {
+    const g = await start(catalogFor([ups[2].url], [ups[1].url]));
+    const r = await ask(g.url, "What is 2+2?");
     assert.equal(r.status, 200);
     assert.equal(r.headers.get("x-chainaim-model"), "local/large");
     assert.equal(r.headers.get("x-chainaim-attempts"), "2");
-    assert.deepEqual(g.pool.unavailableModels(), ["local/small"], "failed deployment is in cooldown");
-    g.server.close();
+    assert.equal(g.pool.isCoolingDown("local/small"), true);
+    await g.close();
   });
 
-  it("uses the healthy replica of the same model before changing model", async () => {
-    const g = await startGateway(catalogFor([ups[2].url, ups[0].url], [ups[1].url]));
-    await g.pool.checkAll(); // health probe marks small@0 down before any request
-    const r = await post(`${g.url}/v1/chat/completions`, { model: "chainaim/auto", messages: [{ role: "user", content: "What is 2+2?" }] });
+  it("uses the healthy replica of a model before changing model", async () => {
+    const g = await start(catalogFor([ups[2].url, ups[0].url], [ups[1].url]));
+    await g.pool.checkAll(); // the probe takes small@0 out before any request
+    const r = await ask(g.url, "What is 2+2?");
     assert.equal(r.headers.get("x-chainaim-model"), "local/small");
-    assert.equal(r.headers.get("x-chainaim-deployment"), "small@1");
-    g.server.close();
+    assert.equal(r.headers.get("x-chainaim-attempts"), "1");
+    await g.close();
   });
 
-  it("times out a slow deployment and falls back", async () => {
-    const g = await startGateway(catalogFor([ups[3].url], [ups[1].url]), { attemptTimeoutMs: 100 });
-    const r = await post(`${g.url}/v1/chat/completions`, { model: "chainaim/auto", messages: [{ role: "user", content: "What is 2+2?" }] });
+  it("times out a slow model and falls back", async () => {
+    const g = await start(catalogFor([ups[3].url], [ups[1].url]), { attemptTimeoutMs: 100 });
+    const r = await ask(g.url, "What is 2+2?");
     assert.equal(r.status, 200);
     assert.equal(r.headers.get("x-chainaim-model"), "local/large");
-    g.server.close();
+    await g.close();
   });
 
-  it("returns the last upstream status with attempts when every model fails", async () => {
-    const g = await startGateway(catalogFor([ups[2].url], [ups[2].url]));
-    const r = await post(`${g.url}/v1/chat/completions`, { model: "chainaim/auto", messages: [{ role: "user", content: "hi" }] });
-    assert.equal(r.status, 500);
+  it("answers 503 with the attempt count when every model fails", async () => {
+    const g = await start(catalogFor([ups[2].url], [ups[2].url]));
+    const r = await ask(g.url, "hi");
+    assert.equal(r.status, 503);
     assert.equal(r.headers.get("x-chainaim-attempts"), "2");
-    g.server.close();
+    await g.close();
   });
 
-  it("streams server-sent events through unchanged", async () => {
-    const g = await startGateway(catalogFor([ups[0].url], [ups[1].url]));
-    const r = await post(`${g.url}/v1/chat/completions`, { model: "chainaim/auto", stream: true, messages: [{ role: "user", content: "hi" }] });
+  it("emulates streaming: one chunk, then [DONE]", async () => {
+    const g = await start(catalogFor([ups[0].url], [ups[1].url]));
+    const r = await post(`${g.url}/v1/chat/completions`, { stream: true, messages: [{ role: "user", content: "hi" }] });
     assert.equal(r.headers.get("content-type"), "text/event-stream");
     const text = await r.text();
     assert.match(text, /hi from small-ok/);
-    assert.match(text, /\[DONE\]/);
-    g.server.close();
+    assert.ok(text.endsWith("data: [DONE]\n\n"));
+    await g.close();
   });
 
-  it("explain returns the decision without calling any model", async () => {
-    const g = await startGateway(catalogFor([ups[0].url], [ups[1].url]));
-    const before = ups[0].hits();
-    const r = await post(`${g.url}/v1/route/explain`, { model: "chainaim/auto", messages: [{ role: "user", content: "Prove that the sum of two odd integers is even, step by step." }] });
-    const j = await r.json();
-    assert.equal(j.decision.tier, "REASONING");
-    assert.equal(j.request.prompt, undefined, "prompt text is not echoed");
-    assert.equal(ups[0].hits(), before);
-    g.server.close();
-  });
-
-  it("enforces the gateway key when configured", async () => {
-    const g = await startGateway(catalogFor([ups[0].url], [ups[1].url]), { gatewayKey: "test-key-123" });
-    const body = { messages: [{ role: "user", content: "hi" }] };
-    assert.equal((await post(`${g.url}/v1/chat/completions`, body)).status, 401);
-    assert.equal((await post(`${g.url}/v1/chat/completions`, body, { authorization: "Bearer test-key-123" })).status, 200);
-    assert.equal((await fetch(`${g.url}/healthz`)).status, 200, "liveness stays open");
-    g.server.close();
-  });
-
-  it("fails closed when the agentic model is down, while ordinary prompts still route", async () => {
-    // large is the only agentic rung and it is unhealthy; small is healthy.
-    const g = await startGateway(catalogFor([ups[0].url], [ups[2].url], ["local/large"]));
-    const agentic = await post(`${g.url}/v1/chat/completions`, { model: "chainaim/auto", messages: [{ role: "user", content: AGENT_PROMPT }], tools: TOOLS });
-    assert.ok(agentic.status >= 500, `stateful action must not be downgraded to the small model, got ${agentic.status}`);
-    assert.notEqual(agentic.headers.get("x-chainaim-model"), "local/small");
-
-    const ordinary = await post(`${g.url}/v1/chat/completions`, { model: "chainaim/auto", messages: [{ role: "user", content: "What is 2+2?" }] });
-    assert.equal(ordinary.status, 200, "non-tool traffic is unaffected by the agentic outage");
-    assert.equal(ordinary.headers.get("x-chainaim-model"), "local/small");
-    g.server.close();
+  it("enforces the gateway key; /healthz stays open", async () => {
+    const g = await start(catalogFor([ups[0].url], [ups[1].url]), { gatewayKey: "test-key-123" });
+    assert.equal((await ask(g.url, "hi")).status, 401);
+    assert.equal((await ask(g.url, "hi", { authorization: "Bearer test-key-123" })).status, 200);
+    assert.equal((await fetch(`${g.url}/healthz`)).status, 200);
+    await g.close();
   });
 
   it("writes a ledger line with no prompt text", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "chainaim-ledger-"));
-    const g = await startGateway(catalogFor([ups[0].url], [ups[1].url]), { ledgerDir: dir });
+    const g = await start(catalogFor([ups[0].url], [ups[1].url]));
     const secret = "Patient Jane Roe MRN 991122";
-    await (await post(`${g.url}/v1/chat/completions`, { messages: [{ role: "user", content: secret }] })).text();
-    const files = readdirSync(dir);
-    assert.equal(files.length, 1);
-    const text = readFileSync(join(dir, files[0]), "utf8");
-    assert.ok(!text.includes("Jane") && !text.includes("991122"), "ledger must not contain prompt text");
+    await (await ask(g.url, secret)).text();
+    const text = ledgerText(g.ledgerDir);
+    assert.ok(!text.includes("Jane") && !text.includes("991122"), "the ledger holds no prompt text");
     const entry = JSON.parse(text.trim());
-    assert.equal(entry.served.model, "local/small");
-    assert.equal(entry.request.promptChars, secret.length);
-    g.server.close();
+    assert.deepEqual([entry.served, entry.promptChars, entry.dataClass], ["local/small", secret.length, "PHI"]);
+    await g.close();
   });
 });

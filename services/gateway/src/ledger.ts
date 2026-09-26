@@ -1,44 +1,30 @@
 /**
- * Decision ledger: one JSON line per request.
- *
- * It records classes, counts, sizes, the routing decision and every attempt.
- * It never records request or response text, placeholders or the placeholder
- * map, so the file is not a copy of sensitive data.
+ * Decision ledger: one JSON line per request. It records classes, counts,
+ * sizes, the routing decision and every attempt. It never records request
+ * or response text, placeholders, the placeholder map, tool arguments or
+ * upstream error bodies (tested with the synthetic corpus).
  */
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { Attempt } from "./dispatch.ts";
-import type { Decision, RequestFeatures } from "./engine.ts";
+import type { ChatRecord } from "./chat.ts";
 import type { DataClass, FoundClass } from "./privacy/classify.ts";
 
-/** A chat request routed by profile (retired in Task C9). */
-export type RoutedEntry = {
-  ts: string;
-  decisionId: string;
-  requestedModel?: string;
-  decision: Omit<Decision, "reasoning"> & { reasoning?: string };
-  request: Pick<RequestFeatures, "maxOutputTokens" | "hasTools" | "requiresTools" | "hasVision" | "requiresStructuredOutput" | "promptChars"> & { stream: boolean };
-  served?: { model: string; deployment: string };
-  attempts: Attempt[];
-  status: number;
-  latencyMs: number;
-};
+type Base = { ts: string; decisionId: string; status: number; latencyMs: number };
 
-/** A scan or mask call: what was found, never the text. */
-export type PrivacyEntry = {
-  ts: string;
-  decisionId: string;
+/** A scan or mask call (spec 8.4): what was found, never the text. */
+export type PrivacyEntry = Base & {
   endpoint: "scan" | "mask";
+  textChars: number;
   dataClass?: DataClass;
   found?: FoundClass[];
   entityCounts?: Record<string, number>;
   cardsRemoved?: number;
-  status: number;
-  latencyMs: number;
-  textChars: number;
 };
 
-export type LedgerEntry = RoutedEntry | PrivacyEntry;
+/** A chat call (spec 8.4). */
+export type ChatEntry = Base & { endpoint: "chat" } & ChatRecord;
+
+export type LedgerEntry = PrivacyEntry | ChatEntry;
 
 export class Ledger {
   private readonly dir: string | undefined;

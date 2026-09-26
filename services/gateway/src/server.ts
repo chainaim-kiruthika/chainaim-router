@@ -1,34 +1,31 @@
 /**
- * ChainAim gateway HTTP surface (OpenAI-compatible).
+ * ChainAim gateway HTTP surface (spec section 8). It is private: only the
+ * paywall reaches it, with the gateway key.
  *
  *   POST /v1/privacy/scan       entities and data class; no model is called
  *   POST /v1/privacy/mask       masked text and the placeholder map
- *   POST /v1/chat/completions   route + dispatch (stream or not)
- *   POST /v1/route/explain      decision only, nothing is sent to a model
- *   GET  /v1/models             catalog models + chainaim/* routing profiles
- *   GET  /v1/deployments        per-deployment health (authenticated)
- *   GET  /healthz               200 when Presidio answered its last check (unauthenticated)
+ *   POST /v1/chat/completions   private chat: mask, route, call, restore
+ *   POST /v1/route/explain      the chat decision without a chat-model call (calls Jev)
+ *   GET  /v1/models             chainaim/auto and the current free pool
+ *   GET  /internal/capacity     whether chat can be served now (the paywall's guard)
+ *   GET  /v1/deployments        per-deployment health
+ *   GET  /healthz               200 when Presidio answered its last check (no auth)
  */
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { Readable } from "node:stream";
-import { PROFILES } from "./catalog.ts";
-import { dispatch, type DispatchOptions } from "./dispatch.ts";
-import { PROFILE_PREFIX, RequestError, type ChatRequest, type Engine } from "./engine.ts";
+import { explainChat, runChat, toSse, type ChatDeps } from "./chat.ts";
 import { HttpError } from "./errors.ts";
 import type { Ledger } from "./ledger.ts";
-import type { Pool } from "./pool.ts";
 import { classify, countTypes } from "./privacy/classify.ts";
 import type { Detected } from "./privacy/entities.ts";
 import { Masker } from "./privacy/mask.ts";
-import { PresidioError, type PresidioClient } from "./privacy/presidio.ts";
+import { PresidioError } from "./privacy/presidio.ts";
 
 /** Scan and mask accept a text of 1 to this many characters. */
 export const MAX_TEXT_CHARS = 20_000;
 
-export type GatewayDeps = { engine: Engine; pool: Pool; ledger: Ledger; presidio: PresidioClient };
-
-export type ServerOptions = DispatchOptions & {
+export type GatewayDeps = ChatDeps & { ledger: Ledger };
+export type ServerOptions = {
   maxBodyBytes: number;
   /** Bearer token clients must send; undefined = no gateway auth (bind to localhost only). */
   gatewayKey: string | undefined;
@@ -72,11 +69,7 @@ function authorized(req: IncomingMessage, key: string | undefined): boolean {
 }
 
 export function createGateway(deps: GatewayDeps, opts: ServerOptions): Server {
-  const { engine, pool, ledger, presidio } = deps;
-  const models = () => [
-    ...PROFILES.map((p) => ({ id: `${PROFILE_PREFIX}${p}`, object: "model", owned_by: "chainaim", kind: "routing-profile" })),
-    ...engine.catalog.models.map((m) => ({ id: m.id, object: "model", owned_by: m.zone, kind: "model", deployments: m.deployments.length })),
-  ];
+  const { presidio, ledger } = deps;
 
   /** scan and mask (spec section 4): detect, classify, and for mask replace. */
   async function privacy(kind: "scan" | "mask", req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -120,89 +113,57 @@ export function createGateway(deps: GatewayDeps, opts: ServerOptions): Server {
     ledger.write({ ...entry, ...found, cardsRemoved: masker.cardsRemoved, status: 200, latencyMs: latencyMs() });
   }
 
-  async function chat(req: IncomingMessage, res: ServerResponse, explainOnly: boolean): Promise<void> {
+  /** Private chat (spec section 4); the headers are spec 8.2's. */
+  async function chat(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const started = performance.now();
     const decisionId = randomUUID();
-    const body = (await readJson(req, opts.maxBodyBytes)) as ChatRequest;
-    if (typeof body !== "object" || body === null || Array.isArray(body)) throw new HttpError(400, "request body must be a JSON object");
-
-    const { decision, features } = engine.decide(body, pool.unavailableModels());
-    const base = { "x-chainaim-decision-id": decisionId };
-    if (explainOnly) {
-      sendJson(res, 200, { decisionId, decision, request: { ...features, prompt: undefined, systemPrompt: undefined } }, base);
-      return;
-    }
-
-    const clientAbort = new AbortController();
+    const body = await readJson(req, opts.maxBodyBytes);
+    const abort = new AbortController();
     res.on("close", () => {
-      if (!res.writableFinished) clientAbort.abort();
+      if (!res.writableFinished) abort.abort();
     });
-    const result = await dispatch(decision.chain, body, pool, opts, clientAbort.signal);
-    const entryBase = {
-      ts: new Date().toISOString(),
-      decisionId,
-      requestedModel: body.model,
-      decision,
-      request: {
-        maxOutputTokens: features.maxOutputTokens,
-        hasTools: features.hasTools,
-        requiresTools: features.requiresTools,
-        hasVision: features.hasVision,
-        requiresStructuredOutput: features.requiresStructuredOutput,
-        promptChars: features.promptChars,
-        stream: body.stream === true,
-      },
-    };
+    const result = await runChat(body, deps, abort.signal);
+    const status = result.ok ? 200 : result.status;
+    ledger.write({ ts: new Date().toISOString(), decisionId, endpoint: "chat", ...result.record, status, latencyMs: Math.round(performance.now() - started) });
 
+    const headers: Record<string, string> = { "x-chainaim-decision-id": decisionId, "x-chainaim-attempts": String(result.record.attempts.length) };
     if (!result.ok) {
-      ledger.write({ ...entryBase, attempts: result.attempts, status: result.status, latencyMs: Math.round(performance.now() - started) });
-      if (result.status !== 499) sendError(res, result.status, result.message, { ...base, "x-chainaim-attempts": String(result.attempts.length) });
+      if (result.status === 499) return; // the client is gone
+      if (result.retryAfterSec !== undefined) headers["retry-after"] = String(result.retryAfterSec);
+      sendError(res, result.status, result.message, headers);
       return;
     }
-
-    const upstream = result.response;
-    const headers: Record<string, string> = {
-      ...base,
-      "content-type": upstream.headers.get("content-type") ?? "application/json",
-      "x-chainaim-model": result.model,
-      "x-chainaim-deployment": result.deployment.id,
-      "x-chainaim-attempts": String(result.attempts.length),
-    };
-    if (decision.tier) headers["x-chainaim-tier"] = decision.tier;
-    if (decision.profile) headers["x-chainaim-profile"] = decision.profile;
-    res.writeHead(upstream.status, headers);
-
-    let ok = true;
-    let error: string | undefined;
-    try {
-      if (upstream.body) {
-        const stream = Readable.fromWeb(upstream.body as import("node:stream/web").ReadableStream<Uint8Array>);
-        for await (const chunk of stream) {
-          if (clientAbort.signal.aborted) break;
-          res.write(chunk);
-        }
-      }
-      res.end();
-    } catch (e) {
-      ok = false;
-      error = `stream: ${(e as Error).message}`;
-      res.destroy();
-    } finally {
-      result.done(ok ? "ok" : "fail", error);
-      ledger.write({
-        ...entryBase,
-        served: { model: result.model, deployment: result.deployment.id },
-        attempts: result.attempts,
-        status: ok ? upstream.status : 502,
-        latencyMs: Math.round(performance.now() - started),
-      });
+    headers["x-chainaim-data-class"] = result.record.dataClass ?? "none";
+    headers["x-chainaim-classifier"] = result.record.classifier ?? "rules";
+    headers["x-chainaim-model"] = result.record.served ?? "";
+    if (!result.stream) {
+      sendJson(res, 200, result.completion, headers);
+      return;
     }
+    const text = toSse(result.completion);
+    res.writeHead(200, { ...headers, "content-type": "text/event-stream", "cache-control": "no-cache", "content-length": Buffer.byteLength(text) });
+    res.end(text);
   }
+
+  async function explain(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const decisionId = randomUUID();
+    const { attempts: _attempts, ...decision } = await explainChat(await readJson(req, opts.maxBodyBytes), deps);
+    sendJson(res, 200, { decisionId, decision }, { "x-chainaim-decision-id": decisionId });
+  }
+
+  const models = () => ({
+    object: "list",
+    data: [
+      { id: "chainaim/auto", object: "model", owned_by: "chainaim" },
+      ...deps.source.models().map((m) => ({ id: m.id, object: "model", owned_by: m.id.split("/")[0], context_length: m.contextLength, supports_tools: m.tools })),
+    ],
+  });
 
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://gateway.local");
+    const route = `${req.method} ${url.pathname}`;
     try {
-      if (req.method === "GET" && url.pathname === "/healthz") {
+      if (route === "GET /healthz") {
         // Unauthenticated: says only whether Presidio answered its last check.
         sendJson(res, presidio.healthy ? 200 : 503, { status: presidio.healthy ? "ok" : "privacy_scanner_unavailable" });
         return;
@@ -211,36 +172,18 @@ export function createGateway(deps: GatewayDeps, opts: ServerOptions): Server {
         sendError(res, 401, "missing or invalid gateway API key");
         return;
       }
-      if (req.method === "POST" && url.pathname === "/v1/privacy/scan") {
-        await privacy("scan", req, res);
-        return;
-      }
-      if (req.method === "POST" && url.pathname === "/v1/privacy/mask") {
-        await privacy("mask", req, res);
-        return;
-      }
-      if (req.method === "GET" && url.pathname === "/v1/deployments") {
-        sendJson(res, 200, { unavailableModels: pool.unavailableModels(), deployments: pool.status() });
-        return;
-      }
-      if (req.method === "GET" && url.pathname === "/v1/models") {
-        sendJson(res, 200, { object: "list", data: models() });
-        return;
-      }
-      if (req.method === "POST" && url.pathname === "/v1/chat/completions") {
-        await chat(req, res, false);
-        return;
-      }
-      if (req.method === "POST" && url.pathname === "/v1/route/explain") {
-        await chat(req, res, true);
-        return;
-      }
-      sendError(res, 404, `no route for ${req.method} ${url.pathname}`);
+      if (route === "POST /v1/privacy/scan") await privacy("scan", req, res);
+      else if (route === "POST /v1/privacy/mask") await privacy("mask", req, res);
+      else if (route === "POST /v1/chat/completions") await chat(req, res);
+      else if (route === "POST /v1/route/explain") await explain(req, res);
+      else if (route === "GET /v1/models") sendJson(res, 200, models());
+      else if (route === "GET /internal/capacity") sendJson(res, 200, deps.quota.capacity(deps.source.ready()));
+      else if (route === "GET /v1/deployments") sendJson(res, 200, { unavailableModels: deps.pool.unavailableModels(), deployments: deps.pool.status() });
+      else sendError(res, 404, `no route for ${route}`);
     } catch (e) {
       if (e instanceof HttpError) sendError(res, e.status, e.message, e.headers);
-      else if (e instanceof RequestError) sendError(res, e.status, e.message);
       else {
-        console.error(`[chainaim-gateway] ${req.method} ${url.pathname}:`, e);
+        console.error(`[chainaim-gateway] ${route}:`, e);
         sendError(res, 500, "internal gateway error");
       }
     }
