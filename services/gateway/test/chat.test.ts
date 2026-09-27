@@ -9,7 +9,7 @@ import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { startStubOpenRouter, type StubOpenRouter } from "../../../scripts/stub-openrouter.ts";
 import { startStubPresidio, type StubPresidio } from "../../../scripts/stub-presidio.ts";
 import { CORPUS } from "../../../scripts/synthetic-corpus.ts";
-import { MAX_CHAT_CHARS, validateChat } from "../src/chat.ts";
+import { MAX_CHAT_CHARS, MAX_CHAT_SEGMENTS, validateChat } from "../src/chat.ts";
 import { HttpError } from "../src/errors.ts";
 import { leaked, ledgerText, post, startTestGateway, withCardsRemoved, type TestGateway, type TestGatewayOptions } from "./helpers.ts";
 
@@ -37,6 +37,13 @@ const user = (content: string) => ({ messages: [{ role: "user", content }] });
 const chat = (g: TestGateway, body: unknown) => post(`${g.url}/v1/chat/completions`, body);
 const capacity = async (g: TestGateway) => (await fetch(`${g.url}/internal/capacity`)).json();
 const ALL = ["stub/alpha-70b:free", "stub/bravo-27b:free", "stub/charlie-8b:free"];
+
+/** Resolves once `ready()` holds, checking every few milliseconds; fails after `ms`. */
+async function waitFor(ready: () => boolean, what: string, ms = 5000): Promise<void> {
+  for (const until = Date.now() + ms; !ready(); await new Promise((r) => setTimeout(r, 5))) {
+    if (Date.now() > until) throw new Error(`timed out waiting for ${what}`);
+  }
+}
 
 describe("launch gate: nothing identifying leaves, masking round-trips, the ledger holds no text", () => {
   let g: TestGateway;
@@ -149,6 +156,16 @@ describe("validateChat", () => {
   it("counts JSON keys toward the character limit", () => {
     assert.equal(validateChat(withArgs('{"abcd":"ef"}'), 1024).chars, 6);
     assert.throws(() => validateChat(withArgs(JSON.stringify({ ["k".repeat(MAX_CHAT_CHARS)]: "v" })), 1024), refused);
+  });
+
+  it("refuses more than 512 text fields, keys included, naming only the count and the limit", () => {
+    // n - 2 contents, then one tool call whose arguments are one key and one value
+    const fields = (n: number) => ({
+      messages: [...Array.from({ length: n - 2 }, () => ({ role: "user", content: "Jane Roe" })), withArgs('{"k":"v"}').messages[0]],
+    });
+    assert.equal(MAX_CHAT_SEGMENTS, 512);
+    assert.doesNotThrow(() => validateChat(fields(512), 1024));
+    assert.throws(() => validateChat(fields(513), 1024), (e: unknown) => refused(e) && (e as Error).message === "messages hold 513 text fields; the limit is 512");
   });
 });
 
@@ -361,6 +378,23 @@ describe("limits and failures", () => {
     or.key.status = 200;
     await gw.quota.refresh();
     assert.equal((await capacity(gw)).chatAvailable, true);
+  });
+
+  it("stops sending text to Presidio when the caller hangs up during detection", async () => {
+    const gw = await start();
+    presidio.mode = "slow"; // each /analyze answer takes 1.5 s, so the caller leaves while the first four are out
+    presidio.requests.length = 0;
+    const client = new AbortController();
+    const messages = Array.from({ length: 40 }, (_, i) => ({ role: "user", content: `Jane Roe, note ${i}` }));
+    const call = fetch(`${gw.url}/v1/chat/completions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messages }), signal: client.signal });
+    const settled = call.catch(() => undefined);
+    await waitFor(() => presidio.requests.length >= 4, "the first /analyze calls");
+    client.abort();
+    await settled;
+    await waitFor(() => ledgerText(gw.ledgerDir).includes('"status":499'), "the client-abort ledger line");
+    assert.equal(presidio.requests.length, 4, "no /analyze call started after the caller left");
+    assert.equal(gw.presidio.healthy, true, "a caller leaving is not a Presidio failure");
+    assert.equal(or.chatBodies.length + or.decisionBodies.length, 0);
   });
 
   it("fails closed: with Presidio down, chat answers 503 and nothing reaches OpenRouter", async () => {

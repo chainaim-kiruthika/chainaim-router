@@ -21,9 +21,12 @@ import { failedFilter, rank, type ExpiringSet, type Need } from "./routing/selec
 
 /** At most this many characters of message text (spec section 4). */
 export const MAX_CHAT_CHARS = 48_000;
+/** At most this many text fields (contents, parts, argument keys and values): each one is a Presidio call. */
+export const MAX_CHAT_SEGMENTS = 512;
 /** The chain is the top three by score (spec section 6). */
 const CHAIN_LENGTH = 3;
 const NO_DENY_PROVIDER = "health data only goes to model providers that do not collect data, and none is available right now; you were not charged";
+const CLIENT_CLOSED = { status: 499, message: "client closed the request" };
 
 export type ChatOptions = { maxOutputTokens: number; maxAttempts: number; attemptTimeoutMs: number; healthFlagThreshold: number };
 export type ChatDeps = {
@@ -108,11 +111,14 @@ export function validateChat(body: unknown, maxOutputTokens: number): Validated 
   if (!Array.isArray(body.messages) || body.messages.length === 0) throw new HttpError(400, "messages: a non-empty array is required");
   const messages = body.messages.map(checkMessage);
   let chars = 0;
+  let segments = 0;
   mapConversation(messages, (text) => {
     chars += text.length;
+    segments++;
     return text;
   });
   if (chars > MAX_CHAT_CHARS) throw new HttpError(400, `messages hold ${chars} characters of text; the limit is ${MAX_CHAT_CHARS}`);
+  if (segments > MAX_CHAT_SEGMENTS) throw new HttpError(400, `messages hold ${segments} text fields; the limit is ${MAX_CHAT_SEGMENTS}`);
   const requested = body.max_completion_tokens ?? body.max_tokens;
   if (requested !== undefined && requested !== null && (!Number.isInteger(requested) || (requested as number) < 1)) {
     throw new HttpError(400, "max_tokens must be a positive integer");
@@ -157,14 +163,14 @@ function taskInput(masked: readonly Message[], v: Validated): TaskInput {
 
 type Prepared = { v: Validated; masked: Message[]; masker: Masker; types: string[]; local: Classes; input: TaskInput };
 
-/** Steps 2 to 4: detect over every text field, classify locally, mask with one shared numbering. */
-async function prepare(v: Validated, deps: ChatDeps, record: ChatRecord): Promise<Prepared> {
+/** Steps 2 to 4: detect over every text field, classify locally, mask with one shared numbering. Detection stops when `signal` aborts. */
+async function prepare(v: Validated, deps: ChatDeps, record: ChatRecord, signal?: AbortSignal): Promise<Prepared> {
   const segments: { text: string; context: string }[] = [];
   mapConversation(v.messages, (text, context) => {
     segments.push({ text, context });
     return text;
   });
-  const found = await deps.presidio.analyzeAll(segments.map((s) => s.context + s.text));
+  const found = await deps.presidio.analyzeAll(segments.map((s) => s.context + s.text), signal);
   const entities = found.map((f, i) => withinValue(segments[i].text, f, segments[i].context.length));
   const all = entities.flat();
   const types = all.map((e) => e.type);
@@ -238,7 +244,7 @@ async function callChain(d: Decision, p: Prepared, deps: ChatDeps, signal: Abort
       case "ok":
         return { ok: true, model, completion: r.completion! };
       case "client_abort":
-        return { ok: false, status: 499, message: "client closed the request" };
+        return { ok: false, ...CLIENT_CLOSED };
       case "rate_limited_account":
         deps.quota.onAccountLimit(r.accountScope ?? "minute");
         return { ok: false, status: 503, message: "the free-model rate limit was reached; you were not charged", retryAfterSec: deps.quota.capacity(true).retryAfterSec ?? 60 };
@@ -275,9 +281,10 @@ export async function runChat(body: unknown, deps: ChatDeps, signal: AbortSignal
   let p: Prepared;
   let d: Decision;
   try {
-    p = await prepare(v, deps, record);
+    p = await prepare(v, deps, record, signal);
     d = await decide(p, deps, record);
   } catch (e) {
+    if (signal.aborted) return { ok: false, ...CLIENT_CLOSED, record }; // the client is gone: not a scanner or model failure
     return { ok: false, ...refusal(e), record };
   }
   const outcome = await callChain(d, p, deps, signal, record);

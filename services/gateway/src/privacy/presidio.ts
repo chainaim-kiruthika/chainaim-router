@@ -29,27 +29,31 @@ export class PresidioClient {
     this.url = opts.url.replace(/\/+$/, "");
   }
 
-  /** Entities in `text`: UTF-16 offsets, whitespace trimmed, overlaps resolved, sorted by start. */
-  async analyze(text: string): Promise<Detected[]> {
+  /** Entities in `text`: UTF-16 offsets, whitespace trimmed, overlaps resolved, sorted by start. `signal` cancels the call. */
+  async analyze(text: string, signal?: AbortSignal): Promise<Detected[]> {
     if (text.trim() === "") return []; // Presidio rejects empty text, and there is nothing to find
-    const raw = await this.call("/analyze", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        text,
-        language: "en",
-        score_threshold: this.opts.threshold,
-        entities: DETECTED_ENTITIES,
-        ad_hoc_recognizers: AD_HOC_RECOGNIZERS,
-      }),
-    });
+    const raw = await this.call(
+      "/analyze",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          text,
+          language: "en",
+          score_threshold: this.opts.threshold,
+          entities: DETECTED_ENTITIES,
+          ad_hoc_recognizers: AD_HOC_RECOGNIZERS,
+        }),
+      },
+      signal,
+    );
     if (!Array.isArray(raw)) throw this.fail("/analyze returned an unexpected shape");
     return postProcess(text, raw.map((r) => this.parseResult(r)));
   }
 
-  /** analyze() for several texts, a few calls at a time; results keep the input order. */
-  analyzeAll(texts: readonly string[]): Promise<Detected[][]> {
-    return mapLimit(texts, this.opts.concurrency ?? 4, (t) => this.analyze(t));
+  /** analyze() for several texts, a few calls at a time; results keep the input order. Once `signal` aborts, no new call starts. */
+  analyzeAll(texts: readonly string[], signal?: AbortSignal): Promise<Detected[][]> {
+    return mapLimit(texts, this.opts.concurrency ?? 4, (t) => this.analyze(t, signal), signal);
   }
 
   async supportedEntities(): Promise<string[]> {
@@ -97,12 +101,18 @@ export class PresidioClient {
     return new PresidioError(`presidio ${message}`);
   }
 
-  private async call(path: string, init?: RequestInit): Promise<unknown> {
+  /** A call the caller cancelled says nothing about Presidio, so health is left as it is. */
+  private failUnlessCancelled(signal: AbortSignal | undefined, message: string): PresidioError {
+    return signal?.aborted ? new PresidioError(`presidio ${message} (cancelled by the caller)`) : this.fail(message);
+  }
+
+  private async call(path: string, init?: RequestInit, signal?: AbortSignal): Promise<unknown> {
+    const timeout = AbortSignal.timeout(this.opts.timeoutMs);
     let res: Response;
     try {
-      res = await fetch(`${this.url}${path}`, { ...init, signal: AbortSignal.timeout(this.opts.timeoutMs) });
+      res = await fetch(`${this.url}${path}`, { ...init, signal: signal ? AbortSignal.any([timeout, signal]) : timeout });
     } catch (e) {
-      throw this.fail(`${path}: ${(e as Error).name}`);
+      throw this.failUnlessCancelled(signal, `${path}: ${(e as Error).name}`);
     }
     if (!res.ok) {
       await res.body?.cancel();
@@ -112,7 +122,7 @@ export class PresidioClient {
     try {
       body = await res.json();
     } catch {
-      throw this.fail(`${path}: the response is not JSON`);
+      throw this.failUnlessCancelled(signal, `${path}: the response is not JSON`);
     }
     this.healthy = true;
     return body;
@@ -192,13 +202,25 @@ export async function waitForPresidio(presidio: PresidioClient, waitMs: number, 
   }
 }
 
-async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+/**
+ * fn over items, `limit` calls at a time, results in input order. Once a call
+ * has failed or `signal` has aborted, no new call starts and the whole map
+ * fails, so a caller never gets results with gaps.
+ */
+async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>, signal?: AbortSignal): Promise<R[]> {
   const out = new Array<R>(items.length);
   let next = 0;
+  let failed = false;
   const worker = async (): Promise<void> => {
-    while (next < items.length) {
+    while (next < items.length && !failed) {
+      if (signal?.aborted) throw new PresidioError("presidio: cancelled by the caller");
       const i = next++;
-      out[i] = await fn(items[i]);
+      try {
+        out[i] = await fn(items[i]);
+      } catch (e) {
+        failed = true;
+        throw e;
+      }
     }
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));

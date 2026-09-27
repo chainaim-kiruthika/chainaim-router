@@ -3,12 +3,15 @@
  * Runs against the stub Presidio over a real socket.
  */
 import assert from "node:assert/strict";
+import { once } from "node:events";
+import { createServer } from "node:http";
 import { after, afterEach, before, describe, it } from "node:test";
 import { startStubPresidio, type StubPresidio } from "../../../scripts/stub-presidio.ts";
 import { AD_HOC_RECOGNIZERS, DETECTED_ENTITIES } from "../src/privacy/entities.ts";
 import { PresidioClient, PresidioError, postProcess, resolveOverlaps, waitForPresidio } from "../src/privacy/presidio.ts";
 import { CORPUS, KNOWN_VALUES } from "../../../scripts/synthetic-corpus.ts";
 import { verifyPresidio } from "../../../scripts/verify-presidio.ts";
+import { closeServer, listen } from "./helpers.ts";
 
 describe("resolveOverlaps", () => {
   it("keeps the longer of two overlapping spans", () => {
@@ -96,6 +99,14 @@ describe("PresidioClient against the stub", () => {
     assert.deepEqual([a.length, b.length, c.length], [1, 0, 2]);
   });
 
+  it("analyzeAll for a caller who has gone sends nothing and leaves health alone", async () => {
+    assert.equal(await client.checkHealth(), true);
+    stub.requests.length = 0;
+    await assert.rejects(client.analyzeAll(["Tom Baker", "Maria Garcia"], AbortSignal.abort()), PresidioError);
+    assert.equal(stub.requests.length, 0);
+    assert.equal(client.healthy, true);
+  });
+
   it("fails closed: a Presidio error is a PresidioError and marks it unhealthy", async () => {
     stub.mode = "fail";
     await assert.rejects(client.analyze("Jane Roe"), PresidioError);
@@ -120,6 +131,36 @@ describe("PresidioClient against the stub", () => {
   it("waitForPresidio refuses to start when a required entity is missing", async () => {
     stub.mode = "missing-entities";
     await assert.rejects(waitForPresidio(client, 1000, 10), /IN_AADHAAR/);
+  });
+});
+
+describe("analyzeAll after a failed call", () => {
+  it("starts no new call once one has failed", async () => {
+    // "fail" is refused at once; any other text is answered after 100 ms
+    const texts: string[] = [];
+    const answered = new EventTarget();
+    const server = createServer(async (req, res) => {
+      let raw = "";
+      for await (const chunk of req) raw += chunk;
+      const { text } = JSON.parse(raw) as { text: string };
+      texts.push(text);
+      if (text === "fail") return void res.writeHead(500).end("{}");
+      setTimeout(() => {
+        res.writeHead(200, { "content-type": "application/json" }).end("[]");
+        answered.dispatchEvent(new Event("answer"));
+      }, 100);
+    });
+    const url = await listen(server);
+    try {
+      const client = new PresidioClient({ url, threshold: 0.4, timeoutMs: 2000, concurrency: 2 });
+      const first = once(answered, "answer");
+      await assert.rejects(client.analyzeAll(["fail", "a", "b", "c", "d"]), PresidioError);
+      await first; // "a" is answered; a worker that ignored the failure would now send "b"
+      await new Promise((r) => setTimeout(r, 50));
+      assert.deepEqual(texts.sort(), ["a", "fail"]);
+    } finally {
+      await closeServer(server);
+    }
   });
 });
 

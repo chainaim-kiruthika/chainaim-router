@@ -9,13 +9,14 @@
  * Modes (set `mode` on the handle, or GET /admin/mode?m=...):
  *   ok | fail (every route answers 500) | malformed (entities without offsets)
  *   | missing-entities (/supportedentities leaves out IN_AADHAAR)
+ *   | slow (/analyze answers after 1.5 s)
  */
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { parseArgs } from "node:util";
 import { KNOWN_VALUES } from "./synthetic-corpus.ts";
 
-export type StubPresidioMode = "ok" | "fail" | "malformed" | "missing-entities";
+export type StubPresidioMode = "ok" | "fail" | "malformed" | "missing-entities" | "slow";
 export type StubPresidio = { url: string; mode: StubPresidioMode; requests: Record<string, unknown>[]; close: () => Promise<void> };
 type Found = { entity_type: string; start: number; end: number; score: number };
 
@@ -25,6 +26,7 @@ export const STUB_SUPPORTED_ENTITIES: readonly string[] = [
 ];
 
 const codePoints = (text: string, utf16: number): number => [...text.slice(0, utf16)].length;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms).unref()); // a slow answer nobody waits for must not keep a process alive
 
 function occurrences(haystack: string, needle: string): number[] {
   const at: number[] = [];
@@ -78,6 +80,7 @@ export function startStubPresidio(port = 0, host = "127.0.0.1"): Promise<StubPre
     if (req.method === "POST" && url.pathname === "/analyze") {
       const body = JSON.parse(raw) as { text?: unknown; entities?: string[]; ad_hoc_recognizers?: { deny_list?: string[] }[] };
       stub.requests.push(body as Record<string, unknown>);
+      if (stub.mode === "slow") await sleep(1500);
       if (!body.text) return json(res, 500, { error: "No text provided" }); // like the real service
       const deny = (body.ad_hoc_recognizers ?? []).flatMap((r) => r.deny_list ?? []);
       const one = (text: string): unknown[] => {
@@ -104,5 +107,5 @@ export function startStubPresidio(port = 0, host = "127.0.0.1"): Promise<StubPre
 if (import.meta.main ?? process.argv[1]?.endsWith("stub-presidio.ts")) {
   const { values } = parseArgs({ options: { port: { type: "string", default: "5002" }, host: { type: "string", default: "127.0.0.1" } } });
   const stub = await startStubPresidio(Number(values.port), values.host);
-  console.log(`[stub-presidio] ${stub.url}  (synthetic corpus only; GET /admin/mode?m=ok|fail|malformed|missing-entities)`);
+  console.log(`[stub-presidio] ${stub.url}  (synthetic corpus only; GET /admin/mode?m=ok|fail|malformed|missing-entities|slow)`);
 }
