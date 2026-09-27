@@ -13,7 +13,7 @@
 - **chat** ($0.01): an OpenAI-compatible chat. The conversation is masked before any model sees it. TypeSafe's Jev (through OpenRouter's Decisions API) classifies the masked request, a scoring table picks among OpenRouter's free models, and the original values are put back into the answer.
 
 **Privacy.**
-- Detection runs on a Presidio analyzer inside ChainAim's private network. Raw text is never sent anywhere before it is masked, and if the scanner is down, every call is refused.
+- Detection runs on a Presidio analyzer inside ChainAim's private network. Message text and tool-call arguments are never sent anywhere before they are masked, and if the scanner is down, scan, mask and chat are refused.
 - Health data only goes to model providers that don't collect data. If none is available, the request is refused and the caller isn't charged.
 - Card numbers are removed, never restored.
 - The decision ledger records classes and counts, never text.
@@ -21,6 +21,6 @@
 
 **Why x402 is core.** Every call is a paid request with no accounts and no API keys: an agent discovers the service in the Bazaar and pays per call. Settlement happens only after a successful answer, so refusals are free.
 
-**Honest limits.** Detection is automated and can miss values: recall is being measured on a synthetic set, and no compliance certification is claimed. Chat runs on free models with OpenRouter's rate limits, so capacity is limited; the paywall only asks for payment when chat can be served.
+**Honest limits.** Detection is automated and can miss values: recall is being measured on a synthetic set, and no compliance certification is claimed. Chat forwards tool definitions, the response_format schema, stop sequences, tool_choice, and tool-call ids and function names as sent, without scanning them. Chat runs on free models with OpenRouter's rate limits, so capacity is limited; the paywall only asks for payment when free-model capacity is available, and any refusal after payment is free.
 
 **Links.** Repository: https://github.com/chainaimdev/chainaim-router · Endpoint: https://PAYWALL-DOMAIN (fill in after deployment)

@@ -40,7 +40,7 @@ curl -si -X POST https://<domain>/v1/privacy/scan -H "content-type: application/
 cd services/paywall && npm install && node scripts/pay.ts --dry-run https://<domain>/v1/privacy/scan '{"text":"hi"}'
 ```
 
-The dry run prints the price (0.002 USDC), the asset, the network, your payTo and `tag=x402-global-challenge`. If the gateway can't start, its log names the missing Presidio entity or the unreachable Presidio.
+The dry run prints the price (0.002 USDC), the asset, the network, your payTo and `tag=x402-global-challenge`. If the gateway can't start, its log names the missing Presidio entity, the entity types Presidio did not detect in its start-up test sentence, or the unreachable Presidio.
 
 ## 4. Pay on TestNet
 
@@ -49,7 +49,7 @@ cd services/paywall
 AVM_MNEMONIC="<buyer's 25 words>" node scripts/pay.ts https://<domain>/v1/privacy/scan '{"text":"Patient Jane Roe, MRN 991122, was diagnosed with diabetes."}'
 ```
 
-Expect `HTTP 200`, the scan result and a payment line with a transaction id. The paywall's log shows one `payment_settled` line.
+Expect `HTTP 200`, the scan result and a payment line with a transaction id. A correct scan result has `dataClass` `PHI`, and its `counts` include PERSON, MEDICAL_RECORD and HEALTH_TERM for this synthetic sentence; anything less means Presidio is not detecting as it should. The paywall's log shows one `payment_settled` line.
 
 ## 5. Switch to MainNet
 
@@ -59,7 +59,7 @@ Expect `HTTP 200`, the scan result and a payment line with a transaction id. The
 
 ## 6. Monitor
 
-Create a free UptimeRobot HTTP monitor on `https://<domain>/healthz` every 5 minutes with email alerts. The paywall proxies it to the gateway, which checks Presidio, so one monitor covers all three services.
+Create a free UptimeRobot HTTP monitor on `https://<domain>/healthz` every 5 minutes with email alerts. The paywall proxies it to the gateway, which checks Presidio, so it covers all three services. Add a second monitor on `GET https://<domain>/v1/models`: it is free and goes through the gateway key, so it catches a wrong `CHAINAIM_GATEWAY_KEY`, which `/healthz` (no key) cannot see.
 
 ## 7. When chat launches
 

@@ -19,7 +19,7 @@ Design: `docs/superpowers/specs/2026-09-24-privacy-gateway-design.md`. Deploymen
 | POST | /v1/chat/completions | $0.01 | Private chat: mask, classify with Jev, route across free models, restore the answer |
 | GET | /v1/models, /healthz | free | The model list; liveness |
 
-Every refusal (4xx, 5xx) is free: the payment settles only when the gateway answers below 400. Chat asks for payment only when it can be served. Health data only goes to model providers that don't collect data; if none is available, the request is refused and not charged.
+Every refusal (4xx, 5xx) is free: the payment settles only when the gateway answers below 400. Chat asks for payment only when free-model capacity is available; any refusal after payment is free. Health data only goes to model providers that don't collect data; if none is available, the request is refused and not charged.
 
 ## Gateway routes (private, behind the gateway key)
 
@@ -58,4 +58,4 @@ npm run test:engine    # the forked route engine (needs its dev dependencies)
 
 ## Privacy rules in short
 
-Presidio runs on the private network, and nothing leaves until the text is masked; if Presidio is down, everything answers 503. The decision ledger never holds text, placeholders or the map. Payment headers are stripped before the gateway, so it never learns who paid. Only allowlisted request fields reach a model, so a client can't override the data policy or pass unscanned text.
+Presidio runs on the private network, and message text and tool-call arguments leave only after they are masked; if Presidio is down, scan, mask and chat (and the private `/v1/route/explain`) answer 503 and `/healthz` reports 503, while the model list, capacity and deployment routes don't depend on Presidio. The decision ledger never holds text, placeholders or the map. Payment headers are stripped before the gateway, so it never learns who paid. Only allowlisted request fields reach a model, so a client can't override the data policy. Chat scans message text and tool-call arguments (keys and values); tool definitions, the `response_format` schema, stop sequences, `tool_choice`, and tool-call ids and function names are forwarded as sent without scanning, so don't put personal data in them.

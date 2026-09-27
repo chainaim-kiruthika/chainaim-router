@@ -17,7 +17,7 @@
 ## Constraints
 - The gateway has no npm runtime dependencies (Node built-ins; Node runs the TypeScript). The paywall uses Hono and the official x402 libraries.
 - Secrets never go in config or git: environment variable NAMES only (`.env.example`).
-- Presidio unreachable means 503 everywhere: text that has not been scanned is never sent anywhere.
+- Presidio unreachable means scan, mask and chat answer 503 and `/healthz` reports 503 (the model list, capacity and deployment routes don't depend on Presidio): message text, tool-call arguments included, that has not been scanned is never sent anywhere.
 - Health data (PHI) goes only to providers that don't collect data (`provider.data_collection: deny`), and never to Jev.
 
 ## Run and test
