@@ -28,6 +28,17 @@ export function withCardsRemoved(text: string): string {
   return out;
 }
 
+const jsonEscaped = (s: string): string => JSON.stringify(s).slice(1, -1);
+
+/**
+ * The corpus values found in `text`, raw or JSON-escaped. In serialized JSON
+ * `Jane "JR" Roe` reads `Jane \"JR\" Roe`, and inside tool-call arguments
+ * (JSON held in a JSON string) it is escaped twice, so all three forms count.
+ */
+export function leaked(text: string): string[] {
+  return KNOWN_VALUES.map((k) => k.value).filter((v) => [v, jsonEscaped(v), jsonEscaped(jsonEscaped(v))].some((form) => text.includes(form)));
+}
+
 export async function listen(server: Server): Promise<string> {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

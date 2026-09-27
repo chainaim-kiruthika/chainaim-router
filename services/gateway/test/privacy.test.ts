@@ -11,7 +11,7 @@ import { stubDetect } from "../../../scripts/stub-presidio.ts";
 import { mapConversation, Masker, withinValue } from "../src/privacy/mask.ts";
 import { postProcess } from "../src/privacy/presidio.ts";
 import { restoreCompletion, restoreText } from "../src/privacy/restore.ts";
-import { withCardsRemoved } from "./helpers.ts";
+import { leaked, withCardsRemoved } from "./helpers.ts";
 
 describe("entity groups", () => {
   it("requires the built-in Presidio entities named in V4", () => {
@@ -227,7 +227,7 @@ describe("conversation masking", () => {
       masker.mask(text, withinValue(text, detect(context + text), context.length)),
     );
     const masked = m.tool_calls![0].function.arguments;
-    for (const { value } of KNOWN_VALUES) assert.ok(!masked.includes(value), `${value} leaked`);
+    assert.deepEqual(leaked(masked), [], "no identifier in the arguments, raw or JSON-escaped");
     assert.equal(restoreText(masked, masker.map, { unresolved: 0 }, true), args);
   });
 });

@@ -8,8 +8,8 @@ import assert from "node:assert/strict";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { startStubOpenRouter, type StubOpenRouter } from "../../../scripts/stub-openrouter.ts";
 import { startStubPresidio, type StubPresidio } from "../../../scripts/stub-presidio.ts";
-import { CORPUS, KNOWN_VALUES } from "../../../scripts/synthetic-corpus.ts";
-import { ledgerText, post, startTestGateway, withCardsRemoved, type TestGateway, type TestGatewayOptions } from "./helpers.ts";
+import { CORPUS } from "../../../scripts/synthetic-corpus.ts";
+import { leaked, ledgerText, post, startTestGateway, withCardsRemoved, type TestGateway, type TestGatewayOptions } from "./helpers.ts";
 
 let presidio: StubPresidio;
 let or: StubOpenRouter;
@@ -32,7 +32,6 @@ function resetStubs(): void {
 }
 
 const user = (content: string) => ({ messages: [{ role: "user", content }] });
-const leaked = (text: string): string[] => KNOWN_VALUES.map((k) => k.value).filter((v) => text.includes(v));
 const chat = (g: TestGateway, body: unknown) => post(`${g.url}/v1/chat/completions`, body);
 const capacity = async (g: TestGateway) => (await fetch(`${g.url}/internal/capacity`)).json();
 const ALL = ["stub/alpha-70b:free", "stub/bravo-27b:free", "stub/charlie-8b:free"];

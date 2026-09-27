@@ -8,7 +8,7 @@ import { after, afterEach, before, describe, it } from "node:test";
 import { startStubPresidio, type StubPresidio } from "../../../scripts/stub-presidio.ts";
 import { CORPUS, KNOWN_VALUES } from "../../../scripts/synthetic-corpus.ts";
 import { restoreText } from "../src/privacy/restore.ts";
-import { ledgerText, post, startTestGateway, withCardsRemoved, type TestGateway } from "./helpers.ts";
+import { leaked, ledgerText, post, startTestGateway, withCardsRemoved, type TestGateway } from "./helpers.ts";
 
 describe("scan and mask", () => {
   let stub: StubPresidio;
@@ -95,7 +95,7 @@ describe("scan and mask", () => {
     // Every test above wrote ledger lines through this gateway.
     const text = ledgerText(g.ledgerDir);
     assert.ok(text.length > 0);
-    for (const { value } of KNOWN_VALUES) assert.ok(!text.includes(value), `${value} is in the ledger`);
+    assert.deepEqual(leaked(text), [], "no identifier in the ledger, raw or JSON-escaped");
     assert.ok(!/<[A-Z_]+_\d+>/.test(text), "a placeholder is in the ledger");
     for (const line of text.trim().split("\n")) {
       const e = JSON.parse(line);
