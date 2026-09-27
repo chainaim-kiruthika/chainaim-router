@@ -8,6 +8,9 @@
 import { TASKS, type Task } from "./scores.ts";
 
 const DIFFICULTY_CRITERIA = ["trivial", "easy", "moderate", "hard", "expert"];
+/** The labels a difficulty answer may use, "0" to "4" or a criterion, with the index each stands for. */
+const DIFFICULTY_LABELS = new Map<string, number>(DIFFICULTY_CRITERIA.flatMap((c, i): [string, number][] => [[String(i), i], [c, i]]));
+const TASK_LABELS: readonly string[] = TASKS;
 
 export const JEV_QUESTIONS = {
   task: {
@@ -84,28 +87,41 @@ function mostLikely(p: Record<string, number>): string {
   return Object.entries(p).reduce((best, cur) => (cur[1] > best[1] ? cur : best))[0];
 }
 
+/** The entries whose key is a known label. The ledger records these maps, and a key the model made up could carry any text. */
+function knownOnly(p: Record<string, number> | undefined, known: (label: string) => boolean): Record<string, number> {
+  return Object.fromEntries(Object.entries(p ?? {}).filter(([label]) => known(label)));
+}
+
 type Answers = Partial<Record<"task" | "difficulty" | "health", Record<string, unknown> | undefined>>;
 
-/** The three answers as the gateway uses them, or undefined when anything is missing or out of range. */
+/**
+ * The three answers as the gateway uses them, or undefined when anything is
+ * missing or out of range. A probability map the answer is read from must
+ * have a known label on top, so it never ends up empty once unknown labels
+ * are dropped.
+ */
 export function parseJevAnswers(body: unknown): JevAnswer | undefined {
   const answers = (body as { answers?: Answers } | null)?.answers;
   if (typeof answers !== "object" || answers === null) return undefined;
 
   const taskProbs = probabilities(answers.task?.probabilities);
   const choice = typeof answers.task?.choice === "string" ? answers.task.choice : taskProbs ? mostLikely(taskProbs) : undefined;
-  if (choice === undefined || !(TASKS as readonly string[]).includes(choice)) return undefined;
+  if (choice === undefined || !TASK_LABELS.includes(choice)) return undefined;
 
   const difficultyProbs = probabilities(answers.difficulty?.probabilities);
   const score = answers.difficulty?.score;
   let index = Number.NaN;
-  if (difficultyProbs) {
-    const label = mostLikely(difficultyProbs);
-    index = /^\d+$/.test(label) ? Number(label) : DIFFICULTY_CRITERIA.indexOf(label);
-  } else if (typeof score === "number") index = Math.round(score);
+  if (difficultyProbs) index = DIFFICULTY_LABELS.get(mostLikely(difficultyProbs)) ?? Number.NaN;
+  else if (typeof score === "number") index = Math.round(score);
   if (!Number.isInteger(index) || index < 0 || index > 4) return undefined;
 
   const health = answers.health?.noul;
   if (typeof health !== "number" || !Number.isFinite(health) || health < 0 || health > 1) return undefined;
 
-  return { task: choice as Task, difficulty: index + 1, health, probabilities: { task: taskProbs ?? {}, difficulty: difficultyProbs ?? {}, health } };
+  const recorded = {
+    task: knownOnly(taskProbs, (label) => TASK_LABELS.includes(label)),
+    difficulty: knownOnly(difficultyProbs, (label) => DIFFICULTY_LABELS.has(label)),
+    health,
+  };
+  return { task: choice as Task, difficulty: index + 1, health, probabilities: recorded };
 }

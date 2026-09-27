@@ -34,6 +34,27 @@ describe("parseJevAnswers", () => {
     assert.equal(parseJevAnswers(answers({ difficulty: { type: "score", probabilities: { trivial: 0.1, hard: 0.9 } } }))?.difficulty, 4);
   });
 
+  it("records only known labels: a probability key the model made up never reaches the ledger", () => {
+    const r = parseJevAnswers(
+      answers({
+        task: { type: "choice", choice: "code", probabilities: { code: 0.7, chat: 0.2, "Jane Roe": 0.1 } },
+        difficulty: { type: "score", score: 2, probabilities: { "0": 0.05, "2": 0.8, "<PERSON_1>": 0.1, "02": 0.05 } },
+      }),
+    );
+    assert.deepEqual(r?.probabilities, { task: { code: 0.7, chat: 0.2 }, difficulty: { "0": 0.05, "2": 0.8 }, health: 0.02 });
+  });
+
+  it("keeps an answer whose choice is given even when every task probability key is unknown", () => {
+    const r = parseJevAnswers(answers({ task: { type: "choice", choice: "chat", probabilities: { "Jane Roe": 1 } } }));
+    assert.deepEqual([r?.task, r?.probabilities.task], ["chat", {}]);
+  });
+
+  it("rejects a probability map it must read whose most likely label is unknown", () => {
+    assert.equal(parseJevAnswers(answers({ task: { type: "choice", probabilities: { "Jane Roe": 0.9, chat: 0.1 } } })), undefined);
+    assert.equal(parseJevAnswers(answers({ difficulty: { type: "score", score: 1, probabilities: { "Jane Roe": 0.9, "1": 0.1 } } })), undefined);
+    assert.equal(parseJevAnswers(answers({ difficulty: { type: "score", probabilities: { "04": 0.9, "1": 0.1 } } })), undefined);
+  });
+
   it("rejects an unknown task, a missing or non-finite health answer and an out-of-range difficulty", () => {
     assert.equal(parseJevAnswers(answers({ task: { type: "choice", choice: "poetry" } })), undefined);
     assert.equal(parseJevAnswers(answers({ health: undefined })), undefined);
