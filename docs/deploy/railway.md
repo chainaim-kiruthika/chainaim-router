@@ -14,7 +14,7 @@ The service names matter: the gateway reaches `presidio.railway.internal:3000`, 
 
 - The repository is on GitHub (Railway builds from it, and the challenge asks for the link).
 - A payTo account: an Algorand address you control. For MainNet it must be opted in to USDC (ASA 31566704).
-- A separate buyer account for test payments (self-payments don't count for the challenge). On TestNet, fund it with ALGO and USDC from the TestNet dispensers.
+- A separate buyer account for test payments (self-payments don't count for the challenge). `node scripts/new-account.ts` in `services/paywall` makes one with the 25 words `pay.ts` reads. On TestNet, fund it with ALGO and USDC from the TestNet dispensers.
 - A gateway key: `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`
 
 ## 2. Create the services
@@ -46,7 +46,7 @@ The dry run prints the price (0.002 USDC), the asset, the network, your payTo an
 
 ```bash
 cd services/paywall
-AVM_MNEMONIC="<buyer's 25 words>" node scripts/pay.ts https://<domain>/v1/privacy/scan '{"text":"Patient Jane Roe, MRN 991122, was diagnosed with diabetes."}'
+read -rsp "Buyer's 25 words: " AVM_MNEMONIC && export AVM_MNEMONIC && node scripts/pay.ts https://<domain>/v1/privacy/scan '{"text":"Patient Jane Roe, MRN 991122, was diagnosed with diabetes."}'
 ```
 
 Expect `HTTP 200`, the scan result and a payment line with a transaction id. A correct scan result has `dataClass` `PHI`, and its `counts` include PERSON, MEDICAL_RECORD and HEALTH_TERM for this synthetic sentence; anything less means Presidio is not detecting as it should. The paywall's log shows one `payment_settled` line.
