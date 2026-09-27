@@ -3,6 +3,7 @@
  * records which endpoints were called, and a gateway that records what
  * reaches it. No real payment and no network call leave the machine.
  */
+import { EventEmitter } from "node:events";
 import { createServer, type IncomingHttpHeaders, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { serve } from "@hono/node-server";
@@ -54,10 +55,18 @@ export function stubFacilitator(): { server: Server; calls: string[] } {
 
 export type Seen = { method: string; path: string; headers: IncomingHttpHeaders; body: string };
 
-/** Records every request. Paid paths answer with state.status; /internal/capacity with state.capacity. */
-export function stubGateway(): { server: Server; seen: Seen[]; state: { status: number; capacityStatus: number; capacity: Record<string, unknown> } } {
+export type GatewayState = { status: number; capacityStatus: number; capacity: Record<string, unknown>; delayMs: number };
+
+/**
+ * Records every request. Paid paths answer with state.status, after
+ * state.delayMs when it is set: `events` then emits "held" when such a call
+ * arrives, and "outcome" with "answered", or "dropped" when the paywall hung
+ * up first. /internal/capacity answers with state.capacity.
+ */
+export function stubGateway(): { server: Server; seen: Seen[]; state: GatewayState; events: EventEmitter } {
   const seen: Seen[] = [];
-  const state = { status: 200, capacityStatus: 200, capacity: { chatAvailable: true } as Record<string, unknown> };
+  const state: GatewayState = { status: 200, capacityStatus: 200, capacity: { chatAvailable: true }, delayMs: 0 };
+  const events = new EventEmitter();
   const server = createServer(async (req, res) => {
     const body = await readBody(req);
     const path = new URL(req.url ?? "/", "http://gateway.local").pathname;
@@ -72,12 +81,25 @@ export function stubGateway(): { server: Server; seen: Seen[]; state: { status: 
       res.end(JSON.stringify({ status: "ok" }));
       return;
     }
-    res.statusCode = state.status;
-    res.setHeader("x-chainaim-decision-id", "decision-1");
-    res.setHeader("x-internal-note", "must not reach the caller");
-    res.end(JSON.stringify(state.status < 400 ? { ok: true } : { error: { message: "refused", code: state.status } }));
+    const answer = (): void => {
+      res.statusCode = state.status;
+      res.setHeader("x-chainaim-decision-id", "decision-1");
+      res.setHeader("x-internal-note", "must not reach the caller");
+      res.end(JSON.stringify(state.status < 400 ? { ok: true } : { error: { message: "refused", code: state.status } }));
+    };
+    if (state.delayMs <= 0) return answer();
+    const timer = setTimeout(() => {
+      answer();
+      events.emit("outcome", "answered");
+    }, state.delayMs);
+    res.on("close", () => {
+      if (res.writableFinished) return;
+      clearTimeout(timer);
+      events.emit("outcome", "dropped");
+    });
+    events.emit("held");
   });
-  return { server, seen, state };
+  return { server, seen, state, events };
 }
 
 /** A paywall on a loopback port. */

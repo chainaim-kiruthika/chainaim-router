@@ -52,12 +52,17 @@ export function createPaywall(config: PaywallConfig, deps: PaywallDeps = {}): Ho
     );
   });
 
-  /** Forward the method, path, content type and body; pass back the status, body and allowed headers. */
+  /**
+   * Forward the method, path, content type and body; pass back the status,
+   * body and allowed headers. A caller who hangs up cancels the gateway call,
+   * so the answer is a 502 and nothing is settled.
+   */
   async function proxy(c: Context): Promise<Response> {
     const headers: Record<string, string> = { authorization: `Bearer ${config.gatewayKey}` };
     const type = c.req.header("content-type");
     if (type) headers["content-type"] = type;
-    const init: RequestInit = { method: c.req.method, headers, signal: AbortSignal.timeout(config.gatewayTimeoutMs) };
+    const signal = AbortSignal.any([AbortSignal.timeout(config.gatewayTimeoutMs), c.req.raw.signal]);
+    const init: RequestInit = { method: c.req.method, headers, signal };
     if (c.req.method !== "GET" && c.req.method !== "HEAD") init.body = await c.req.arrayBuffer();
     let upstream: Response;
     try {

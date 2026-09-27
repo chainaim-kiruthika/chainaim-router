@@ -4,6 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { CHALLENGE_TAG, NETWORKS } from "../src/config.ts";
@@ -42,6 +43,7 @@ describe("paywall (TestNet)", () => {
     gateway.state.status = 200;
     gateway.state.capacityStatus = 200;
     gateway.state.capacity = { chatAvailable: true };
+    gateway.state.delayMs = 0;
     logs.length = 0;
   });
 
@@ -70,6 +72,23 @@ describe("paywall (TestNet)", () => {
     assert.equal(r.status, 503);
     assert.deepEqual(facilitator.calls, ["/verify"]);
     assert.equal(r.headers.get("payment-response"), null);
+    assert.deepEqual(logs, [], "no payment logged");
+  });
+
+  it("never settles a paid call whose caller hangs up before the gateway answers", async () => {
+    const required = await priceOf("/v1/privacy/scan");
+    facilitator.calls.length = 0;
+    gateway.state.delayMs = 2000; // the gateway answers only if the paywall is still waiting then
+    const held = once(gateway.events, "held");
+    const client = new AbortController();
+    const headers = { "content-type": "application/json", "payment-signature": paymentFor(required) };
+    const call = fetch(`${paywall.url}/v1/privacy/scan`, { method: "POST", headers, body: JSON.stringify({ text: "Jane Roe" }), signal: client.signal }).catch(() => undefined);
+    await held;
+    const outcome = once(gateway.events, "outcome");
+    client.abort();
+    await call;
+    assert.deepEqual(await outcome, ["dropped"], "the paywall cancelled its gateway call");
+    assert.deepEqual(facilitator.calls, ["/verify"], "verified, never settled");
     assert.deepEqual(logs, [], "no payment logged");
   });
 
