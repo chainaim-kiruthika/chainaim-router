@@ -334,6 +334,15 @@ describe("limits and failures", () => {
     assert.equal(r.headers.get("x-chainaim-model"), "stub/alpha-70b:free");
   });
 
+  it("an answer with no content and no tool call is never served: the chain moves on, and all empty is a free 503", async () => {
+    const gw = await start();
+    for (const id of ALL) or.chatModes[id] = "empty";
+    const r = await chat(gw, user("hi"));
+    assert.equal(r.status, 503);
+    assert.equal(r.headers.get("x-chainaim-attempts"), "3");
+    for (const id of ALL) assert.equal(gw.pool.isCoolingDown(id), true, id);
+  });
+
   it("a request every model rejects returns that 4xx and cools nothing down", async () => {
     const gw = await start();
     for (const id of ALL) or.chatModes[id] = "badrequest";

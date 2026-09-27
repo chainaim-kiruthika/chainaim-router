@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { startStubOpenRouter, STUB_MODELS, type StubOpenRouter } from "../../../scripts/stub-openrouter.ts";
-import { attemptChat } from "../src/dispatch.ts";
+import { attemptChat, parseCompletion } from "../src/dispatch.ts";
 import { categorize, REQUEST_FAULTS, shapeBody } from "../src/openrouter.ts";
 import { Pool } from "../src/pool.ts";
 import { openRouterDeployments, parseFreeModels } from "../src/routing/freepool.ts";
@@ -33,6 +33,7 @@ describe("categorize", () => {
     ["data policy 404", 404, err("No endpoints found matching your data policy"), "deny", { outcome: "data_policy_unavailable" }],
     ["routing requirements 503", 503, err("There is no available model provider that meets your routing requirements"), "deny", { outcome: "data_policy_unavailable" }],
     ["data policy text on an allow request", 404, err("No endpoints found matching your data policy"), "allow", { outcome: "upstream_error" }],
+    ["no endpoints for the model, on a deny request", 404, err("No endpoints found for stub/alpha-70b:free."), "deny", { outcome: "upstream_error" }],
     ["key 401", 401, err("No auth credentials found"), "allow", { outcome: "key_rejected" }],
     ["key 403", 403, err("Key disabled"), "allow", { outcome: "key_rejected" }],
     ["moderation 403", 403, err("flagged", { reasons: ["x"], flagged_input: "..." }), "allow", { outcome: "upstream_error" }],
@@ -46,6 +47,25 @@ describe("categorize", () => {
   it("counts 400, 413 and 422 as the request's own fault", () => {
     assert.deepEqual([...REQUEST_FAULTS].sort(), [400, 413, 422]);
   });
+});
+
+describe("parseCompletion", () => {
+  const answer = (message: unknown) => JSON.stringify({ id: "gen-1", choices: [{ index: 0, message, finish_reason: "stop" }] });
+  const call = { id: "call_1", type: "function", function: { name: "lookup", arguments: "{}" } };
+  const cases: [string, string, boolean][] = [
+    ["text content", answer({ role: "assistant", content: "Paris." }), true],
+    ["a tool call and no content", answer({ role: "assistant", content: null, tool_calls: [call] }), true],
+    ["no content (the token cap ran out)", answer({ role: "assistant", content: null, reasoning: "thinking" }), false],
+    ["empty content", answer({ role: "assistant", content: "" }), false],
+    ["blank content", answer({ role: "assistant", content: " \n\n " }), false],
+    ["an empty tool-call list", answer({ role: "assistant", content: null, tool_calls: [] }), false],
+    ["no message", JSON.stringify({ choices: [{ index: 0 }] }), false],
+    ["no choices", JSON.stringify({ choices: [] }), false],
+    ["not JSON", "<html>oops</html>", false],
+  ];
+  for (const [name, text, counts] of cases) {
+    it(`${name}: ${counts ? "an answer" : "not an answer"}`, () => assert.equal(parseCompletion(text) !== undefined, counts));
+  }
 });
 
 describe("attemptChat against the stub OpenRouter", () => {
@@ -94,6 +114,20 @@ describe("attemptChat against the stub OpenRouter", () => {
     const r = await attempt();
     assert.deepEqual([r.attempt.outcome, r.attempt.status], ["upstream_error", 400]);
     assert.equal(pool.isCoolingDown(MODEL), false);
+  });
+
+  it("cools a model down when OpenRouter has no endpoint for it (404)", async () => {
+    or.chatModes[MODEL] = "gone404";
+    const r = await attempt();
+    assert.deepEqual([r.attempt.outcome, r.attempt.status], ["upstream_error", 404]);
+    assert.equal(pool.isCoolingDown(MODEL), true);
+  });
+
+  it("treats an answer with no content and no tool call as an upstream error and cools the model down", async () => {
+    or.chatModes[MODEL] = "empty";
+    const r = await attempt();
+    assert.deepEqual([r.attempt.outcome, r.attempt.status, r.completion], ["upstream_error", 200, undefined]);
+    assert.equal(pool.isCoolingDown(MODEL), true);
   });
 
   it("reports an account limit with its scope and leaves the model alone", async () => {

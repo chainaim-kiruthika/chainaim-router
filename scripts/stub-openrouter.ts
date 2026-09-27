@@ -14,6 +14,8 @@
  *   policy503      503 routing requirements, for deny requests
  *   unauthorized   401     server500   500     badrequest   400
  *   slow           answers after 1.5 s     notjson   200 with a body that is not JSON
+ *   gone404        404 "No endpoints found for <model>." for any request
+ *   empty          200 with no content and no tool call (a reasoning model out of tokens)
  * Jev (jev.mode): ok | slow | fail500 | malformed, answering jev.task,
  * jev.difficulty (1 to 5) and jev.health.
  */
@@ -21,7 +23,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { parseArgs } from "node:util";
 
-export type ChatMode = "ok" | "account429" | "account429day" | "provider429" | "policy404" | "policy503" | "unauthorized" | "server500" | "badrequest" | "slow" | "notjson";
+export type ChatMode = "ok" | "account429" | "account429day" | "provider429" | "policy404" | "policy503" | "unauthorized" | "server500" | "badrequest" | "slow" | "notjson" | "gone404" | "empty";
 export type JevMode = "ok" | "slow" | "fail500" | "malformed";
 export type StubOpenRouter = {
   url: string;
@@ -86,7 +88,7 @@ function lastUserText(body: Record<string, unknown>): string {
   return "";
 }
 
-function completion(body: Record<string, unknown>): unknown {
+function completion(body: Record<string, unknown>): Record<string, unknown> {
   const text = lastUserText(body);
   const toolCall = Array.isArray(body.tools) && body.tools.length > 0 && text.includes("call lookup");
   const message = toolCall
@@ -183,6 +185,12 @@ export function startStubOpenRouter(port = 0, host = "127.0.0.1"): Promise<StubO
           res.writeHead(200, { "content-type": "application/json" });
           res.end("<html>oops</html>");
           return;
+        case "gone404":
+          return json(res, 404, error(404, `No endpoints found for ${String(body.model)}.`));
+        case "empty": {
+          const message = { role: "assistant", content: null, reasoning: "Working through the steps first." };
+          return json(res, 200, { ...completion(body), choices: [{ index: 0, message, finish_reason: "length" }] });
+        }
         default:
           break;
       }

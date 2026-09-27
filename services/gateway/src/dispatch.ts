@@ -4,31 +4,46 @@
  * cache between attempts.
  */
 import type { HealthEffect, Pool } from "./pool.ts";
-import { categorize, type DataCollection, type Outcome } from "./openrouter.ts";
+import { categorize, REQUEST_FAULTS, type DataCollection, type Outcome } from "./openrouter.ts";
 
 /** One try of one model, as the ledger records it (never an error body). */
 export type ModelAttempt = { model: string; outcome: Outcome; status?: number; ms: number };
 export type AttemptResult = { attempt: ModelAttempt; completion?: Record<string, unknown>; accountScope?: "minute" | "day" };
 
-/** What an outcome says about the deployment's health (spec section 7 and plan refinement 4). */
+/**
+ * What an outcome says about the deployment's health (spec section 7 and plan
+ * refinement 4). Of the upstream errors, only a request the model refused
+ * (400, 413, 422) leaves the model alone; a 404 "No endpoints found", any
+ * other 4xx, a 5xx and an empty or malformed 2xx answer cool it down.
+ */
 function healthEffect(outcome: Outcome, status: number | undefined): HealthEffect {
   if (outcome === "ok") return "ok";
   if (outcome === "rate_limited_provider") return "cooldown";
-  if (outcome === "upstream_error") return status === undefined || status >= 500 || status === 408 || (status >= 200 && status < 300) ? "cooldown" : "neutral";
+  if (outcome === "upstream_error") return status !== undefined && REQUEST_FAULTS.has(status) ? "neutral" : "cooldown";
   if (outcome === "timeout" || outcome === "network_error") return "fail";
   return "neutral"; // account limits, a rejected key, the data policy, a client abort: not this model's health
 }
 
-/** A 2xx body counts only when it is a chat completion with at least one choice. */
-function parseCompletion(text: string): Record<string, unknown> | undefined {
+/**
+ * A 2xx body counts only when it is a chat completion whose first choice
+ * holds an answer: text content that is not blank, or at least one tool call.
+ * A reasoning model that spends the whole token cap answers with no content,
+ * and the caller must not pay for that.
+ */
+export function parseCompletion(text: string): Record<string, unknown> | undefined {
+  let j: unknown;
   try {
-    const j = JSON.parse(text) as unknown;
-    const choices = (j as { choices?: unknown } | null)?.choices;
-    if (typeof j === "object" && j !== null && !Array.isArray(j) && Array.isArray(choices) && choices.length > 0) return j as Record<string, unknown>;
+    j = JSON.parse(text);
   } catch {
-    // not JSON
+    return undefined; // not JSON
   }
-  return undefined;
+  if (typeof j !== "object" || j === null || Array.isArray(j)) return undefined;
+  const choices = (j as { choices?: unknown }).choices;
+  const first = Array.isArray(choices) ? (choices[0] as { message?: { content?: unknown; tool_calls?: unknown } } | null | undefined) : undefined;
+  const content = first?.message?.content;
+  const calls = first?.message?.tool_calls;
+  const answered = (typeof content === "string" && content.trim() !== "") || (Array.isArray(calls) && calls.length > 0);
+  return answered ? (j as Record<string, unknown>) : undefined;
 }
 
 /**
