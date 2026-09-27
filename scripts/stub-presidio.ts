@@ -10,13 +10,14 @@
  *   ok | fail (every route answers 500) | malformed (entities without offsets)
  *   | missing-entities (/supportedentities leaves out IN_AADHAAR)
  *   | slow (/analyze answers after 1.5 s)
+ *   | detect-nothing (/supportedentities is complete, /analyze finds nothing)
  */
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { parseArgs } from "node:util";
 import { KNOWN_VALUES } from "./synthetic-corpus.ts";
 
-export type StubPresidioMode = "ok" | "fail" | "malformed" | "missing-entities" | "slow";
+export type StubPresidioMode = "ok" | "fail" | "malformed" | "missing-entities" | "slow" | "detect-nothing";
 export type StubPresidio = { url: string; mode: StubPresidioMode; requests: Record<string, unknown>[]; close: () => Promise<void> };
 type Found = { entity_type: string; start: number; end: number; score: number };
 
@@ -85,6 +86,7 @@ export function startStubPresidio(port = 0, host = "127.0.0.1"): Promise<StubPre
       const deny = (body.ad_hoc_recognizers ?? []).flatMap((r) => r.deny_list ?? []);
       const one = (text: string): unknown[] => {
         if (stub.mode === "malformed") return [{ entity_type: "PERSON", score: 0.85 }];
+        if (stub.mode === "detect-nothing") return [];
         return stubDetect(text, deny).filter((e) => !body.entities || body.entities.includes(e.entity_type));
       };
       return json(res, 200, Array.isArray(body.text) ? body.text.map((t) => one(String(t))) : one(String(body.text)));
@@ -107,5 +109,5 @@ export function startStubPresidio(port = 0, host = "127.0.0.1"): Promise<StubPre
 if (import.meta.main ?? process.argv[1]?.endsWith("stub-presidio.ts")) {
   const { values } = parseArgs({ options: { port: { type: "string", default: "5002" }, host: { type: "string", default: "127.0.0.1" } } });
   const stub = await startStubPresidio(Number(values.port), values.host);
-  console.log(`[stub-presidio] ${stub.url}  (synthetic corpus only; GET /admin/mode?m=ok|fail|malformed|missing-entities|slow)`);
+  console.log(`[stub-presidio] ${stub.url}  (synthetic corpus only; GET /admin/mode?m=ok|fail|malformed|missing-entities|slow|detect-nothing)`);
 }

@@ -66,7 +66,7 @@ export class PresidioClient {
   async checkHealth(): Promise<boolean> {
     try {
       const res = await fetch(`${this.url}/health`, { signal: AbortSignal.timeout(this.opts.timeoutMs) });
-      await res.body?.cancel();
+      await res.body?.cancel().catch(() => undefined); // cancel() rejects when the stream already failed
       this.healthy = res.ok;
     } catch {
       this.healthy = false;
@@ -115,7 +115,7 @@ export class PresidioClient {
       throw this.failUnlessCancelled(signal, `${path}: ${(e as Error).name}`);
     }
     if (!res.ok) {
-      await res.body?.cancel();
+      await res.body?.cancel().catch(() => undefined); // cancel() rejects when the stream already failed
       throw this.fail(`${path}: HTTP ${res.status}`);
     }
     let body: unknown;
@@ -178,27 +178,43 @@ export function resolveOverlaps(spans: readonly Detected[]): Detected[] {
 }
 
 /**
+ * The start-up check's test sentence, built from synthetic corpus values
+ * (scripts/synthetic-corpus.ts). The name needs the NLP model, the e-mail is
+ * a pattern, and the record number needs ChainAim's ad-hoc recognizer and its
+ * context word "MRN".
+ */
+const CANARY = "Patient Jane Roe, MRN 991122, can be reached at jane.roe@example.com.";
+const CANARY_TYPES: readonly string[] = ["PERSON", "EMAIL_ADDRESS", "MEDICAL_RECORD"];
+
+/**
  * Start-up check (V4): wait until Presidio answers, then refuse to run if a
- * required built-in entity is missing. A missing entity fails at once; an
- * unreachable Presidio is retried every pauseMs until waitMs runs out.
+ * required built-in entity is missing, or if the test sentence does not come
+ * back with a name, an e-mail and a medical record number. A wrong answer
+ * fails at once (naming entity types only, never the sentence); an
+ * unreachable Presidio, or a failed call, is retried every pauseMs until
+ * waitMs runs out.
  */
 export async function waitForPresidio(presidio: PresidioClient, waitMs: number, pauseMs = 2000): Promise<void> {
   const deadline = Date.now() + waitMs;
-  for (;;) {
-    let supported: string[];
-    try {
-      supported = await presidio.supportedEntities();
-    } catch (e) {
-      if (Date.now() + pauseMs > deadline) throw new Error(`Presidio at ${presidio.url} did not answer within ${waitMs} ms (${(e as Error).message})`);
-      await new Promise((r) => setTimeout(r, pauseMs));
-      continue;
+  const answer = async <T>(call: () => Promise<T>): Promise<T> => {
+    for (;;) {
+      try {
+        return await call();
+      } catch (e) {
+        if (Date.now() + pauseMs > deadline) throw new Error(`Presidio at ${presidio.url} did not answer within ${waitMs} ms (${(e as Error).message})`);
+        await new Promise((r) => setTimeout(r, pauseMs));
+      }
     }
-    const have = new Set(supported);
-    const missing = REQUIRED_PRESIDIO_ENTITIES.filter((e) => !have.has(e));
-    if (missing.length > 0) {
-      throw new Error(`Presidio at ${presidio.url} does not support ${missing.join(", ")}; deploy services/presidio, which enables them`);
-    }
-    return;
+  };
+  const have = new Set(await answer(() => presidio.supportedEntities()));
+  const missing = REQUIRED_PRESIDIO_ENTITIES.filter((e) => !have.has(e));
+  if (missing.length > 0) {
+    throw new Error(`Presidio at ${presidio.url} does not support ${missing.join(", ")}; deploy services/presidio, which enables them`);
+  }
+  const found = new Set((await answer(() => presidio.analyze(CANARY))).map((e) => e.type));
+  const undetected = CANARY_TYPES.filter((t) => !found.has(t));
+  if (undetected.length > 0) {
+    throw new Error(`Presidio at ${presidio.url} did not detect ${undetected.join(", ")} in the start-up test sentence; deploy services/presidio, which detects them`);
   }
 }
 

@@ -65,7 +65,7 @@ export class JevClient {
         signal: AbortSignal.timeout(this.opts.timeoutMs),
       });
       if (!res.ok) {
-        await res.body?.cancel();
+        await res.body?.cancel().catch(() => undefined); // cancel() rejects when the stream already failed
         return undefined;
       }
       const answer = parseJevAnswers(await res.json());

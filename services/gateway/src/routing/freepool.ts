@@ -71,7 +71,7 @@ export class FreePool implements ModelSource {
     try {
       const res = await fetch(`${this.opts.baseUrl}/api/v1/models`, { signal: AbortSignal.timeout(this.opts.timeoutMs) });
       if (!res.ok) {
-        await res.body?.cancel();
+        await res.body?.cancel().catch(() => undefined); // cancel() rejects when the stream already failed
         return false;
       }
       models = parseFreeModels(await res.json());

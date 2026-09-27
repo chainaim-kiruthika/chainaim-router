@@ -154,7 +154,7 @@ export class Pool {
     if (key) headers.authorization = `Bearer ${key}`;
     try {
       const res = await fetch(Pool.healthUrlOf(s.deployment), { headers, signal: AbortSignal.timeout(this.opts.healthTimeoutMs) });
-      await res.body?.cancel();
+      await res.body?.cancel().catch(() => undefined); // cancel() rejects when the stream already failed
       if (res.ok) this.recordSuccess(s);
       else this.recordFailure(s, `health HTTP ${res.status}`);
     } catch (e) {

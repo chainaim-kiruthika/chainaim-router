@@ -11,7 +11,7 @@ import { AD_HOC_RECOGNIZERS, DETECTED_ENTITIES } from "../src/privacy/entities.t
 import { PresidioClient, PresidioError, postProcess, resolveOverlaps, waitForPresidio } from "../src/privacy/presidio.ts";
 import { CORPUS, KNOWN_VALUES } from "../../../scripts/synthetic-corpus.ts";
 import { verifyPresidio } from "../../../scripts/verify-presidio.ts";
-import { closeServer, listen } from "./helpers.ts";
+import { closeServer, leaked, listen } from "./helpers.ts";
 
 describe("resolveOverlaps", () => {
   it("keeps the longer of two overlapping spans", () => {
@@ -124,13 +124,24 @@ describe("PresidioClient against the stub", () => {
     assert.equal(await client.checkHealth(), false);
   });
 
-  it("waitForPresidio passes when every required entity is supported", async () => {
+  it("waitForPresidio passes when every required entity is supported and the test sentence is detected", async () => {
+    stub.requests.length = 0;
     await waitForPresidio(client, 1000, 10);
+    assert.equal(stub.requests.length, 1, "one /analyze call for the test sentence");
   });
 
   it("waitForPresidio refuses to start when a required entity is missing", async () => {
     stub.mode = "missing-entities";
     await assert.rejects(waitForPresidio(client, 1000, 10), /IN_AADHAAR/);
+  });
+
+  it("waitForPresidio refuses to start when Presidio answers but detects nothing, naming only the entity types", async () => {
+    stub.mode = "detect-nothing";
+    await assert.rejects(waitForPresidio(client, 1000, 10), (e: Error) => {
+      assert.match(e.message, /did not detect PERSON, EMAIL_ADDRESS, MEDICAL_RECORD in the start-up test sentence/);
+      assert.deepEqual(leaked(e.message), [], "the message holds none of the sentence's values");
+      return true;
+    });
   });
 });
 
