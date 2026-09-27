@@ -9,6 +9,8 @@ import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { startStubOpenRouter, type StubOpenRouter } from "../../../scripts/stub-openrouter.ts";
 import { startStubPresidio, type StubPresidio } from "../../../scripts/stub-presidio.ts";
 import { CORPUS } from "../../../scripts/synthetic-corpus.ts";
+import { MAX_CHAT_CHARS, validateChat } from "../src/chat.ts";
+import { HttpError } from "../src/errors.ts";
 import { leaked, ledgerText, post, startTestGateway, withCardsRemoved, type TestGateway, type TestGatewayOptions } from "./helpers.ts";
 
 let presidio: StubPresidio;
@@ -85,6 +87,47 @@ describe("launch gate: nothing identifying leaves, masking round-trips, the ledg
     assert.equal(JSON.parse(call.function.arguments).query, 'call lookup for Jane "JR" Roe at C:\\records\\991122.txt');
   });
 
+  /** A conversation whose assistant turn called `name` with `args`, as a client sends it back. */
+  const withToolCall = (first: string, name: string, args: unknown) => ({
+    messages: [
+      { role: "user", content: first },
+      { role: "assistant", content: null, tool_calls: [{ id: "call_k", type: "function", function: { name, arguments: JSON.stringify(args) } }] },
+      { role: "tool", tool_call_id: "call_k", content: "done" },
+      { role: "user", content: "Thanks, what next?" },
+    ],
+  });
+
+  it("masks identifiers a tool call uses as JSON keys, for the model and for Jev", async () => {
+    const chatBefore = or.chatBodies.length;
+    const jevBefore = or.decisionBodies.length;
+    const r = await chat(g, withToolCall("Share the budget file.", "share", { "jane.roe@example.com": { access: "owner" }, 'Jane "JR" Roe': "approved" }));
+    assert.equal(r.status, 200);
+    const sent = or.chatBodies.slice(chatBefore);
+    assert.equal(sent.length, 1);
+    assert.deepEqual(leaked(JSON.stringify(sent)), [], "no identifier reached the model");
+    const history = sent[0].messages as { tool_calls?: { function: { arguments: string } }[] }[];
+    assert.deepEqual(JSON.parse(history[1].tool_calls![0].function.arguments), { "<EMAIL_ADDRESS_1>": { access: "owner" }, "<PERSON_1>": "approved" });
+    assert.deepEqual(sent[0].provider, { data_collection: "allow" });
+    const jevCalls = or.decisionBodies.slice(jevBefore);
+    assert.equal(jevCalls.length, 1, "not PHI, so Jev classifies it");
+    assert.deepEqual(leaked(JSON.stringify(jevCalls)), [], "no identifier reached Jev");
+  });
+
+  it("counts a health term used as a JSON key: the request becomes PHI, no-collection and never shown to Jev", async () => {
+    const plain = await chat(g, withToolCall("Update the chart for Tom Baker.", "update_chart", { status: true }));
+    assert.equal(plain.headers.get("x-chainaim-data-class"), "PII", "without the health term the request is not PHI");
+    const chatBefore = or.chatBodies.length;
+    const jevBefore = or.decisionBodies.length;
+    const r = await chat(g, withToolCall("Update the chart for Tom Baker.", "update_chart", { diabetes: true }));
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get("x-chainaim-data-class"), "PHI");
+    const sent = or.chatBodies.slice(chatBefore);
+    assert.equal(sent.length, 1);
+    assert.deepEqual(sent[0].provider, { data_collection: "deny" });
+    assert.deepEqual(leaked(JSON.stringify(sent)), [], "no identifier reached the model");
+    assert.equal(or.decisionBodies.length, jevBefore, "Jev never sees PHI");
+  });
+
   it("keeps every identifier, placeholder and the map out of the ledger", () => {
     const text = ledgerText(g.ledgerDir);
     const lines = text.trim().split("\n").map((l) => JSON.parse(l));
@@ -96,6 +139,16 @@ describe("launch gate: nothing identifying leaves, masking round-trips, the ledg
       for (const k of ["map", "maskedText", "messages", "content", "text"]) assert.ok(!(k in e), `${k} is in a ledger line`);
       for (const a of e.attempts) for (const k of Object.keys(a)) assert.ok(["model", "outcome", "status", "ms"].includes(k), `attempt field ${k}`);
     }
+  });
+});
+
+describe("validateChat", () => {
+  const withArgs = (args: string) => ({ messages: [{ role: "assistant", content: null, tool_calls: [{ type: "function", function: { name: "f", arguments: args } }] }] });
+  const refused = (e: unknown) => e instanceof HttpError && e.status === 400;
+
+  it("counts JSON keys toward the character limit", () => {
+    assert.equal(validateChat(withArgs('{"abcd":"ef"}'), 1024).chars, 6);
+    assert.throws(() => validateChat(withArgs(JSON.stringify({ ["k".repeat(MAX_CHAT_CHARS)]: "v" })), 1024), refused);
   });
 });
 

@@ -67,10 +67,14 @@ export type TextMapper = (text: string, context: string) => string;
  * Rebuild a conversation with every text field passed through fn, in reading
  * order: messages in order; in each, the content (a string or text parts),
  * then each tool call's arguments. Arguments that are JSON are split into
- * their string and number values (keys are the developer's schema and stay),
- * so a masked value can never break JSON escaping; a masked number comes
- * back as a string. Fields other than role, content, tool_calls and
- * tool_call_id are dropped, so no unscanned text can ride along.
+ * their keys and their string and number values, so a masked value can never
+ * break JSON escaping; a masked number comes back as a string. Each key is a
+ * text of its own, visited before its value, because a model can put an
+ * identifier in a key; the value is read with the original key as context.
+ * Two keys that mask to the same placeholder become one key (that object
+ * loses a value; nothing leaks). Arguments holding an integer that JSON.parse
+ * would round are scanned whole instead. Fields other than role, content,
+ * tool_calls and tool_call_id are dropped, so no unscanned text can ride along.
  */
 export function mapConversation(messages: readonly Message[], fn: TextMapper): Message[] {
   return messages.map((m) => {
@@ -97,7 +101,17 @@ function mapArguments(args: string, fn: TextMapper): string {
   } catch {
     return fn(args, "");
   }
+  // A 16 to 19 digit card number sent as a bare number would reach detection with changed digits.
+  if (hasUnsafeInteger(parsed)) return fn(args, "");
   return JSON.stringify(mapJson(parsed, "", fn));
+}
+
+/** True when the value holds an integer beyond 2^53, which JSON.parse has rounded. */
+function hasUnsafeInteger(value: unknown): boolean {
+  if (typeof value === "number") return Number.isInteger(value) && !Number.isSafeInteger(value);
+  if (Array.isArray(value)) return value.some(hasUnsafeInteger);
+  if (typeof value === "object" && value !== null) return Object.values(value).some(hasUnsafeInteger);
+  return false;
 }
 
 function mapJson(value: unknown, key: string, fn: TextMapper): unknown {
@@ -110,7 +124,12 @@ function mapJson(value: unknown, key: string, fn: TextMapper): unknown {
   }
   if (Array.isArray(value)) return value.map((v) => mapJson(v, key, fn));
   if (typeof value === "object" && value !== null) {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, mapJson(v, k, fn)]));
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => {
+        const outKey = fn(k, ""); // the key first: reading order
+        return [outKey, mapJson(v, k, fn)];
+      }),
+    );
   }
   return value;
 }

@@ -165,7 +165,7 @@ describe("restore", () => {
 });
 
 describe("conversation masking", () => {
-  it("visits every text field in reading order, with the JSON key as context", () => {
+  it("visits every text field in reading order: each JSON key before its value, which has the key as context", () => {
     const seen: [string, string][] = [];
     mapConversation(
       [
@@ -179,7 +179,53 @@ describe("conversation masking", () => {
         return text;
       },
     );
-    assert.deepEqual(seen, [["", "Be brief."], ["", "part one"], ["", "part two"], ["patient: ", "Jane Roe"], ["ids: ", "991122"], ["mrn: ", "991122"], ["", "done"]]);
+    assert.deepEqual(seen, [
+      ["", "Be brief."],
+      ["", "part one"],
+      ["", "part two"],
+      ["", "patient"],
+      ["patient: ", "Jane Roe"],
+      ["", "ids"],
+      ["ids: ", "991122"],
+      ["", "note"],
+      ["", "mrn"],
+      ["mrn: ", "991122"],
+      ["", "done"],
+    ]);
+  });
+
+  it("masks an identifier used as a JSON key: the key goes upstream as its placeholder and restores", () => {
+    const args = JSON.stringify({ "jane.roe@example.com": { 'Jane "JR" Roe': "owner" } });
+    const seen: [string, string][] = [];
+    const masker = new Masker();
+    const [m] = mapConversation([{ role: "assistant", tool_calls: [{ type: "function", function: { name: "share", arguments: args } }] }], (text, context) => {
+      seen.push([context, text]);
+      return masker.mask(text, withinValue(text, detect(context + text), context.length));
+    });
+    assert.deepEqual(seen, [["", "jane.roe@example.com"], ["", 'Jane "JR" Roe'], ['Jane "JR" Roe: ', "owner"]]);
+    const masked = m.tool_calls![0].function.arguments;
+    assert.equal(masked, '{"<EMAIL_ADDRESS_1>":{"<PERSON_1>":"owner"}}');
+    assert.equal(restoreText(masked, masker.map, { unresolved: 0 }, true), args);
+  });
+
+  it("scans arguments whole when JSON.parse would round an integer beyond 2^53", () => {
+    const args = '{"note":"refund","card":12345678901234567890}';
+    const seen: [string, string][] = [];
+    const [m] = mapConversation([{ role: "assistant", tool_calls: [{ type: "function", function: { name: "pay", arguments: args } }] }], (text, context) => {
+      seen.push([context, text]);
+      return text;
+    });
+    assert.deepEqual(seen, [["", args]], "one raw segment, digits as sent");
+    assert.equal(m.tool_calls![0].function.arguments, args);
+  });
+
+  it("keeps scanning a number below 2^53 as a value: a 16-digit card keeps its digits", () => {
+    const seen: [string, string][] = [];
+    mapConversation([{ role: "assistant", tool_calls: [{ type: "function", function: { name: "pay", arguments: '{"card":5500005555555559}' } }] }], (text, context) => {
+      seen.push([context, text]);
+      return text;
+    });
+    assert.deepEqual(seen, [["", "card"], ["card: ", "5500005555555559"]]);
   });
 
   it("keeps only role, content, tool_calls and tool_call_id", () => {
