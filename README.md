@@ -8,7 +8,7 @@ agent ──HTTPS──▶ paywall (public, x402) ──private network──▶
                    └──▶ GoPlausible facilitator                └──▶ Presidio analyzer (private)
 ```
 
-Design: `docs/superpowers/specs/2026-09-24-privacy-gateway-design.md`. Deployment: `docs/deploy/railway.md`. Decisions: `docs/adr/`.
+Setup on your machine: `SETUP.md`. Design: `docs/superpowers/specs/2026-09-24-privacy-gateway-design.md`. Deployment: `docs/deploy/railway.md`. Decisions: `docs/adr/`.
 
 ## Paid endpoints (the paywall)
 
