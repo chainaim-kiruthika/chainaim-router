@@ -12,14 +12,19 @@ export type AttemptResult = { attempt: ModelAttempt; completion?: Record<string,
 
 /**
  * What an outcome says about the deployment's health (spec section 7 and plan
- * refinement 4). Of the upstream errors, only a request the model refused
- * (400, 413, 422) leaves the model alone; a 404 "No endpoints found", any
- * other 4xx, a 5xx and an empty or malformed 2xx answer cool it down.
+ * refinement 4). Of the upstream errors, only a refusal caused by the request
+ * leaves the model alone: 400, 413 and 422, and a 403. If it did not, a
+ * caller whose payment is verified but never settled could cool every model
+ * down for free. A 404 "No endpoints found", any other 4xx, a 5xx and an
+ * empty or malformed 2xx answer cool the model down.
  */
 function healthEffect(outcome: Outcome, status: number | undefined): HealthEffect {
   if (outcome === "ok") return "ok";
   if (outcome === "rate_limited_provider") return "cooldown";
-  if (outcome === "upstream_error") return status !== undefined && REQUEST_FAULTS.has(status) ? "neutral" : "cooldown";
+  if (outcome === "upstream_error") {
+    // categorize sends 401 and every 403 without moderation metadata to key_rejected, so a 403 here is a moderation refusal: about the request, not the model.
+    return status !== undefined && (REQUEST_FAULTS.has(status) || status === 403) ? "neutral" : "cooldown";
+  }
   if (outcome === "timeout" || outcome === "network_error") return "fail";
   return "neutral"; // account limits, a rejected key, the data policy, a client abort: not this model's health
 }

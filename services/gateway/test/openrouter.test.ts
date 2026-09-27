@@ -116,6 +116,13 @@ describe("attemptChat against the stub OpenRouter", () => {
     assert.equal(pool.isCoolingDown(MODEL), false);
   });
 
+  it("does not cool a model down for a moderation refusal (403 with moderation metadata)", async () => {
+    or.chatModes[MODEL] = "moderation403";
+    const r = await attempt();
+    assert.deepEqual([r.attempt.outcome, r.attempt.status], ["upstream_error", 403]);
+    assert.equal(pool.isCoolingDown(MODEL), false);
+  });
+
   it("cools a model down when OpenRouter has no endpoint for it (404)", async () => {
     or.chatModes[MODEL] = "gone404";
     const r = await attempt();
