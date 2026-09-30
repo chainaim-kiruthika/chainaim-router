@@ -14,9 +14,11 @@ const KEY = "test-gateway-key";
 
 type PaymentRequired = { accepts: Record<string, any>[]; resource: { url: string }; extensions?: Record<string, any>; [key: string]: any };
 const decode = (header: string | null): PaymentRequired => JSON.parse(Buffer.from(header!, "base64").toString("utf8"));
+/** Each payment carries its own signed transaction, as a real one does; the replay guard rejects a repeat. */
+let paymentCount = 0;
 /** A payment payload the stub facilitator accepts: it echoes the first accepted requirement. */
-const paymentFor = (required: PaymentRequired): string =>
-  Buffer.from(JSON.stringify({ x402Version: 2, accepted: required.accepts[0], payload: { paymentGroup: ["AAAA"], paymentIndex: 0 }, resource: required.resource })).toString("base64");
+const paymentFor = (required: PaymentRequired, group: string[] = [Buffer.from(`signed transaction ${++paymentCount}`).toString("base64")]): string =>
+  Buffer.from(JSON.stringify({ x402Version: 2, accepted: required.accepts[0], payload: { paymentGroup: group, paymentIndex: 0 }, resource: required.resource })).toString("base64");
 
 describe("paywall (TestNet)", () => {
   const facilitator = stubFacilitator();
@@ -162,6 +164,98 @@ describe("paywall (TestNet)", () => {
     const r = await fetch(`${paywall.url}/v1/other`);
     assert.equal(r.status, 404);
     assert.equal(r.headers.get("payment-required"), null);
+  });
+});
+
+describe("paywall replay guard (O1)", () => {
+  const facilitator = stubFacilitator();
+  const gateway = stubGateway();
+  let now = 1_000_000;
+  let paywall: { url: string; close: () => Promise<void> };
+  const SCAN = "/v1/privacy/scan";
+
+  before(async () => {
+    const facilitatorUrl = await listen(facilitator.server);
+    const gatewayUrl = await listen(gateway.server);
+    paywall = await startPaywall(
+      { AVM_PAY_TO: PAY_TO, GATEWAY_URL: gatewayUrl, CHAINAIM_GATEWAY_KEY: KEY, FACILITATOR_URL: facilitatorUrl, PUBLIC_BASE_URL: "https://pay.example.com" },
+      undefined,
+      { now: () => now, maxReplayEntries: 3 },
+    );
+  });
+  after(async () => {
+    await paywall.close();
+    await close(facilitator.server);
+    await close(gateway.server);
+  });
+  beforeEach(() => {
+    gateway.seen.length = 0;
+    facilitator.calls.length = 0;
+    gateway.state.status = 200;
+    gateway.state.delayMs = 0;
+  });
+
+  const pay = (payment: string) =>
+    fetch(`${paywall.url}${SCAN}`, { method: "POST", headers: { "content-type": "application/json", "payment-signature": payment }, body: JSON.stringify({ text: "Jane Roe" }) });
+  const required = async (): Promise<PaymentRequired> =>
+    decode((await fetch(`${paywall.url}${SCAN}`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).headers.get("payment-required"));
+  const served = () => gateway.seen.filter((s) => s.path === SCAN).length;
+  const group = (label: string) => [Buffer.from(label).toString("base64")];
+
+  it("refuses a payment signature it has seen before, without verifying it or calling the gateway", async () => {
+    gateway.state.status = 400; // a refusal: the payment is verified but never settled, so nothing on the chain stops a replay
+    const payment = paymentFor(await required());
+    assert.equal((await pay(payment)).status, 400);
+    assert.equal(served(), 1);
+    facilitator.calls.length = 0;
+    const replay = await pay(payment);
+    assert.equal(replay.status, 402, "the caller is asked to sign a new payment");
+    assert.ok(replay.headers.get("payment-required"), "with the price, so an x402 client can pay again");
+    assert.deepEqual(facilitator.calls, [], "the replay never reached the facilitator");
+    assert.equal(served(), 1, "nor the gateway");
+  });
+
+  it("recognises the same signed transactions in a re-encoded payload", async () => {
+    const req = await required();
+    const bytes = Buffer.from("signed transaction re-encoded");
+    assert.equal((await pay(paymentFor(req, [bytes.toString("base64")]))).status, 200);
+    facilitator.calls.length = 0;
+    const urlSafe = bytes.toString("base64url"); // the same bytes in another alphabet, no padding
+    assert.equal((await pay(paymentFor(req, [urlSafe]))).status, 402);
+    assert.deepEqual(facilitator.calls, []);
+  });
+
+  it("accepts a different signed transaction straight after", async () => {
+    const req = await required();
+    assert.equal((await pay(paymentFor(req, group("first")))).status, 200);
+    assert.equal((await pay(paymentFor(req, group("second")))).status, 200);
+    assert.equal(served(), 2);
+  });
+
+  it("lets only one of two simultaneous calls with the same signature through", async () => {
+    gateway.state.delayMs = 300;
+    const payment = paymentFor(await required(), group("simultaneous"));
+    const statuses = (await Promise.all([pay(payment), pay(payment)])).map((r) => r.status).sort();
+    assert.deepEqual(statuses, [200, 402]);
+    assert.equal(served(), 1);
+  });
+
+  it("forgets a signature after one hour, longer than any Algorand transaction stays valid", async () => {
+    const req = await required();
+    const payment = paymentFor(req, group("forgotten"));
+    assert.equal((await pay(payment)).status, 200);
+    now += 3_599_000;
+    assert.equal((await pay(payment)).status, 402, "still remembered just before the hour");
+    now += 2_000;
+    assert.equal((await pay(payment)).status, 200, "forgotten after it");
+  });
+
+  it("keeps a bounded number of signatures, dropping the oldest first", async () => {
+    const req = await required(); // the guard holds 3 here
+    const [a, b, c, d] = ["a", "b", "c", "d"].map((l) => paymentFor(req, group(`bounded ${l}`)));
+    for (const p of [a, b, c, d]) assert.equal((await pay(p)).status, 200);
+    assert.equal((await pay(d)).status, 402, "the newest is still remembered");
+    assert.equal((await pay(a)).status, 200, "the oldest was dropped to make room");
   });
 });
 
