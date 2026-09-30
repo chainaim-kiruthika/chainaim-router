@@ -208,15 +208,55 @@ describe("conversation masking", () => {
     assert.equal(restoreText(masked, masker.map, { unresolved: 0 }, true), args);
   });
 
-  it("scans arguments whole when JSON.parse would round an integer beyond 2^53", () => {
+  it("scans an integer beyond 2^53 as its own value with the digits as sent, and sends the same digits on", () => {
     const args = '{"note":"refund","card":12345678901234567890}';
     const seen: [string, string][] = [];
     const [m] = mapConversation([{ role: "assistant", tool_calls: [{ type: "function", function: { name: "pay", arguments: args } }] }], (text, context) => {
       seen.push([context, text]);
       return text;
     });
-    assert.deepEqual(seen, [["", args]], "one raw segment, digits as sent");
-    assert.equal(m.tool_calls![0].function.arguments, args);
+    assert.deepEqual(seen, [["", "note"], ["note: ", "refund"], ["", "card"], ["card: ", "12345678901234567890"]], "digits as sent, not rounded");
+    assert.equal(m.tool_calls![0].function.arguments, args, "not rounded to 12345678901234567000");
+  });
+
+  it("decodes escapes beside an integer beyond 2^53, so an escaped name is still seen as the name (N1)", () => {
+    const args = '{"who":"\\u004aane \\u0052oe","id":12345678901234567890}';
+    const seen: string[] = [];
+    mapConversation([{ role: "assistant", tool_calls: [{ type: "function", function: { name: "open", arguments: args } }] }], (text) => {
+      seen.push(text);
+      return text;
+    });
+    assert.ok(seen.includes("Jane Roe"), `the decoded name is scanned as its own text: ${JSON.stringify(seen)}`);
+    assert.ok(!seen.some((t) => t.includes("\\u004a")), "no raw escape sequence reaches detection");
+  });
+
+  it("turns a masked integer beyond 2^53 into a string and leaves the other numbers as sent", () => {
+    const out = mapConversation([{ role: "assistant", tool_calls: [{ type: "function", function: { name: "pay", arguments: '{"n":42,"card":12345678901234567890,"big":98765432109876543210}' } }] }], (t) =>
+      t === "12345678901234567890" ? "[CARD REMOVED]" : t,
+    );
+    assert.equal(out[0].tool_calls![0].function.arguments, '{"n":42,"card":"[CARD REMOVED]","big":98765432109876543210}');
+  });
+
+  it("handles an integer beyond 2^53 that is the whole arguments, in an array, or has an exponent", () => {
+    const seen: string[] = [];
+    const out = mapConversation(
+      [
+        {
+          role: "assistant",
+          tool_calls: [
+            { type: "function", function: { name: "a", arguments: "12345678901234567890" } },
+            { type: "function", function: { name: "b", arguments: '{"ids":[1,12345678901234567890,"x"]}' } },
+            { type: "function", function: { name: "c", arguments: '{"n":1e30}' } },
+          ],
+        },
+      ],
+      (text) => {
+        seen.push(text);
+        return text;
+      },
+    );
+    assert.deepEqual(out[0].tool_calls!.map((c) => c.function.arguments), ["12345678901234567890", '{"ids":[1,12345678901234567890,"x"]}', '{"n":1e30}']);
+    assert.ok(seen.includes("12345678901234567890") && seen.includes("1e30"), "the digits as sent are scanned");
   });
 
   it("keeps scanning a number below 2^53 as a value: a 16-digit card keeps its digits", () => {

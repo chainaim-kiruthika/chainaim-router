@@ -7,7 +7,7 @@ import { EventEmitter } from "node:events";
 import { createServer, type IncomingHttpHeaders, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { serve } from "@hono/node-server";
-import { createPaywall } from "../src/app.ts";
+import { createPaywall, type PaywallDeps } from "../src/app.ts";
 import { loadConfig, NETWORKS } from "../src/config.ts";
 
 /** Synthetic Algorand address used as payTo and fee payer. */
@@ -103,8 +103,12 @@ export function stubGateway(): { server: Server; seen: Seen[]; state: GatewaySta
 }
 
 /** A paywall on a loopback port. */
-export async function startPaywall(env: Record<string, string>, log?: (line: string) => void): Promise<{ url: string; close: () => Promise<void> }> {
-  const app = createPaywall(loadConfig(env), { log: log ?? (() => {}) });
+export async function startPaywall(
+  env: Record<string, string>,
+  log?: (line: string) => void,
+  deps: Omit<PaywallDeps, "log"> = {},
+): Promise<{ url: string; close: () => Promise<void> }> {
+  const app = createPaywall(loadConfig(env), { log: log ?? (() => {}), ...deps });
   let server: Server | undefined;
   const url = await new Promise<string>((resolve) => {
     server = serve({ fetch: app.fetch, port: 0, hostname: "127.0.0.1" }, (info) => resolve(`http://127.0.0.1:${info.port}`)) as Server;
