@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PrivacyBuddy: spend your tokens wisely</title>
+<meta name="description" content="Private AI chat. Your secrets are masked on your device, and you pay per answer in USDC on Algorand.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M16 6l8 3v6c0 5-3.4 8.6-8 11-4.6-2.4-8-6-8-11V9z' fill='white'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f5f6fb; --bg2: #e6eafd; --card: #ffffff; --ink: #15182b; --muted: #5b6178; --line: #e1e4f0;
+    --brand: #4f46e5; --brand2: #06b6d4; --ok: #15803d; --warn: #b42318; --warnbg: #fef3f2; --code: #f1f3fb;
+    --ph: #4338ca; --phbg: rgba(79, 70, 229, .13); --orig: #0e7490; --origbg: rgba(6, 182, 212, .16);
+    --shadow: 0 12px 32px rgba(40, 50, 120, .12);
+  }
+  @media (prefers-color-scheme: dark) { :root {
+    --bg: #0b0d1a; --bg2: #141846; --card: #151931; --ink: #eef0ff; --muted: #a4abc7; --line: #262b4d;
+    --brand: #8b8cff; --brand2: #22d3ee; --ok: #4ade80; --warn: #ff9a90; --warnbg: #2a1416; --code: #1b2040;
+    --ph: #b4b5ff; --phbg: rgba(139, 140, 255, .18); --orig: #67e8f9; --origbg: rgba(34, 211, 238, .16);
+    --shadow: 0 12px 32px rgba(0, 0, 0, .4);
+  } }
+  * { box-sizing: border-box; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+  body { margin: 0; min-height: 100vh; color: var(--ink); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: radial-gradient(1100px 520px at 88% -8%, var(--bg2), transparent 62%), radial-gradient(900px 520px at -8% 6%, var(--bg2), transparent 58%), var(--bg); }
+  a { color: var(--brand); }
+  button { font: inherit; }
+  :focus-visible { outline: 3px solid var(--brand2); outline-offset: 2px; }
+
+  .bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; max-width: 1080px; margin: 0 auto; padding: 18px 20px; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 800; font-size: 1.15rem; letter-spacing: -.01em; color: var(--ink); text-decoration: none; }
+  .brand svg { width: 34px; height: 34px; flex: none; }
+  .wallets { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+  .chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); box-shadow: 0 2px 8px rgba(40, 50, 120, .06); font-size: .85rem; }
+  .chip .lab { color: var(--muted); font-weight: 600; }
+  .chip .addr { font: .82rem ui-monospace, Consolas, monospace; }
+  .chip .bal { font-weight: 700; color: var(--ok); }
+  .chip .bal.low { color: var(--warn); }
+  .chip button, .chip a.go { border: 1px solid var(--line); background: transparent; color: var(--muted); border-radius: 999px; padding: 2px 9px; cursor: pointer; font-size: .75rem; text-decoration: none; }
+  .chip button:hover, .chip a.go:hover { color: var(--brand); border-color: var(--brand); }
+
+  main { max-width: 820px; margin: 0 auto; padding: 8px 20px 56px; }
+  .hero { text-align: center; padding: 34px 0 26px; }
+  h1 { margin: 0 0 12px; font-size: clamp(2.1rem, 6.4vw, 3.6rem); line-height: 1.05; letter-spacing: -.03em; }
+  .grad { background: linear-gradient(90deg, var(--brand), var(--brand2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lead { margin: 0 auto 16px; max-width: 34rem; color: var(--muted); font-size: 1.1rem; }
+  .trust { list-style: none; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 0; padding: 0; }
+  .trust li { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); font-size: .85rem; color: var(--muted); }
+  .trust li::before { content: "✓ "; color: var(--ok); font-weight: 800; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: clamp(16px, 4vw, 28px); box-shadow: var(--shadow); }
+  .steps { display: flex; gap: 8px; list-style: none; margin: 0 0 18px; padding: 0; }
+  .steps li { flex: 1; text-align: center; padding: 8px 6px; border-radius: 12px; font-size: .88rem; font-weight: 600; color: var(--muted); background: var(--code); border: 1px solid transparent; transition: all .2s; }
+  .steps li b { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 6px; border-radius: 50%; background: var(--line); color: var(--ink); font-size: .78rem; }
+  .steps li.on { color: var(--ink); border-color: var(--brand); background: var(--phbg); }
+  .steps li.on b { background: linear-gradient(135deg, var(--brand), var(--brand2)); color: #fff; }
+  .steps li.done b { background: var(--ok); color: #fff; }
+  .lab2 { display: block; margin: 0 0 6px; font-size: .8rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  textarea { width: 100%; min-height: 150px; resize: vertical; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--code); color: var(--ink); font: inherit; }
+  textarea:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--phbg); }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+  .btn { padding: 11px 20px; border-radius: 12px; border: 1px solid var(--brand); cursor: pointer; font-weight: 700; }
+  .btn.primary { color: #fff; background: linear-gradient(135deg, var(--brand), #6d5bf7 55%, var(--brand2)); border-color: transparent; box-shadow: 0 6px 18px rgba(79, 70, 229, .35); }
+  .btn.primary:hover { filter: brightness(1.06); }
+  .btn.ghost { color: var(--brand); background: transparent; }
+  .btn:disabled { opacity: .55; cursor: wait; box-shadow: none; }
+  .hint { margin: 12px 0 0; color: var(--muted); font-size: .86rem; }
+
+  .pane { margin-top: 18px; padding-top: 18px; border-top: 1px dashed var(--line); animation: rise .25s ease-out; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .doc { background: var(--code); border-radius: 14px; padding: 14px; white-space: pre-wrap; word-break: break-word; line-height: 1.75; max-height: 320px; overflow: auto; }
+  mark.ph { background: var(--phbg); color: var(--ph); border-radius: 6px; padding: 1px 6px; font: .86em ui-monospace, Consolas, monospace; font-weight: 600; }
+  mark.orig { background: var(--origbg); color: var(--orig); border-radius: 6px; padding: 1px 4px; box-shadow: inset 0 -2px 0 var(--orig); }
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+  .pill { padding: 3px 11px; border: 1px solid var(--line); border-radius: 999px; font-size: .8rem; background: var(--card); color: var(--muted); }
+  .pill.good { color: var(--ok); border-color: var(--ok); }
+  .answer { background: var(--code); border-radius: 16px; padding: 16px 18px; }
+  .md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
+  .md p, .md ul, .md ol, .md pre, .md blockquote { margin: 0 0 .75em; }
+  .md ul, .md ol { padding-left: 1.4em; }
+  .md h1, .md h2, .md h3 { font-size: 1.05rem; margin: .8em 0 .4em; letter-spacing: 0; }
+  .md code { background: var(--line); padding: 1px 5px; border-radius: 5px; font: .88em ui-monospace, Consolas, monospace; }
+  .md pre { background: var(--line); padding: 10px; border-radius: 10px; overflow: auto; } .md pre code { background: none; padding: 0; }
+  .md blockquote { padding-left: 12px; border-left: 3px solid var(--line); color: var(--muted); }
+  .receipt { margin-top: 12px; padding: 10px 14px; border: 1px solid var(--ok); border-radius: 12px; font-size: .9rem; color: var(--ok); }
+  .receipt code { font: .85rem ui-monospace, Consolas, monospace; }
+  .error { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--warn); border-radius: 12px; background: var(--warnbg); color: var(--warn); }
+  .error a { color: inherit; font-weight: 700; }
+  .busy { display: flex; align-items: center; gap: 10px; margin-top: 14px; color: var(--muted); }
+  .spin { width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--brand); animation: turn .8s linear infinite; }
+  @keyframes turn { to { transform: rotate(360deg); } }
+  footer { text-align: center; padding: 10px 20px 36px; color: var(--muted); font-size: .85rem; }
+  @media (max-width: 560px) { .wallets { justify-content: flex-start; } .steps li { font-size: .78rem; } .steps li b { display: none; } }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="/" aria-label="PrivacyBuddy home">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f46e5"/><stop offset="1" stop-color="#06b6d4"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#g)"/><path d="M16 6l8 3v6c0 5-3.4 8.6-8 11-4.6-2.4-8-6-8-11V9z" fill="#fff"/><path d="M12.5 15.5l2.6 2.6 4.6-5" fill="none" stroke="#4f46e5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span>PrivacyBuddy</span>
+  </a>
+  <div class="wallets" id="wallets" aria-label="Wallets" aria-live="polite"></div>
+</header>
+
+<main>
+  <section class="hero">
+    <h1>Spend your tokens <span class="grad">wisely</span></h1>
+    <p class="lead">Private AI chat. Your secrets are masked on your device, and you pay per answer in USDC on Algorand.</p>
+    <ul class="trust"><li>Masked on your device</li><li>Pay per answer with x402</li><li>No account needed</li></ul>
+  </section>
+
+  <section class="card" aria-labelledby="chatTitle">
+    <ol class="steps" aria-label="Steps">
+      <li id="s1" class="on"><b>1</b>Write</li>
+      <li id="s2"><b>2</b>Masked</li>
+      <li id="s3"><b>3</b>Execute</li>
+    </ol>
+    <label class="lab2" for="msg" id="chatTitle">Your private message</label>
+    <textarea id="msg" rows="6" placeholder="Type a message. Put names after a label, like “Name: …”, so they can be masked."></textarea>
+    <div class="row">
+      <button class="btn primary" id="maskBtn" type="button">Mask my message</button>
+      <button class="btn ghost" id="exampleBtn" type="button">Try an example</button>
+    </div>
+    <p class="hint">Masking runs on your device with pattern checks. ChainAim's server scans the masked text again before any model sees it.</p>
+
+    <div class="pane" id="maskedPane" hidden>
+      <span class="lab2">What will be sent (masked)</span>
+      <div class="pills" id="maskedPills"></div>
+      <div class="doc" id="maskedView"></div>
+      <div class="row">
+        <button class="btn primary" id="execBtn" type="button">Execute</button>
+        <button class="btn ghost" id="editBtn" type="button">Edit message</button>
+      </div>
+    </div>
+
+    <div id="status" role="status" aria-live="polite"></div>
+
+    <div class="pane" id="answerPane" hidden>
+      <span class="lab2">Answer</span>
+      <div class="pills" id="answerPills"></div>
+      <div class="answer md" id="answerView"></div>
+      <div class="receipt" id="receipt" hidden></div>
+      <div class="row"><button class="btn ghost" id="againBtn" type="button">Start over</button></div>
+    </div>
+  </section>
+</main>
+<footer>PrivacyBuddy by ChainAim · payments settle with x402 on Algorand</footer>
+
+<script type="module">
+import { maskText, restore } from "/client-mask.js";
+
+const $ = (id) => document.getElementById(id);
+const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); for (const k of kids) e.append(k); return e; };
+const short = (a) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "…");
+/** Keep in step with EXAMPLE in test/mask.test.ts. */
+const EXAMPLE = "Name: Priya Raman\nEmail: priya.raman@example.com\nPhone: +91 98765 43210\nPAN: AJZPR4821K\n\nPlease write a short, polite email asking my landlord to refund my security deposit of INR 50,000.";
+const PLACEHOLDER = /(<C_[A-Z_]+_\d+>|\[CARD REMOVED\])/;
+/** Friendly names for what client-mask.ts finds: [one, many]. */
+const KIND = {
+  PERSON: ["name", "names"], EMAIL_ADDRESS: ["email address", "email addresses"], PHONE_NUMBER: ["phone number", "phone numbers"],
+  IN_PAN: ["PAN number", "PAN numbers"], IN_AADHAAR: ["Aadhaar number", "Aadhaar numbers"], IN_IFSC: ["bank IFSC code", "bank IFSC codes"],
+  IN_BANK_ACCOUNT: ["bank account number", "bank account numbers"], MEDICAL_RECORD: ["medical record number", "medical record numbers"], CREDIT_CARD: ["card number", "card numbers"],
+};
+
+let wallets = null;
+let current = null; // { masked, map } for the message on screen
+
+/* ---------- wallets, top right ---------- */
+const loraBase = () => `https://lora.algokit.io/${wallets?.network === "mainnet" ? "mainnet" : "testnet"}`;
+
+async function copy(text, button) {
+  try { await navigator.clipboard.writeText(text); button.textContent = "Copied"; }
+  catch { window.prompt("Copy this address", text); }
+  setTimeout(() => { button.textContent = "Copy"; }, 1400);
+}
+
+function chip(label, address, extra) {
+  const c = el("div", { className: "chip" }, el("span", { className: "lab", textContent: label }));
+  if (!address) { c.append(el("span", { className: "addr", textContent: "not available" })); return c; }
+  const copyBtn = el("button", { type: "button", textContent: "Copy", title: `Copy the ${label} address` });
+  copyBtn.onclick = () => copy(address, copyBtn);
+  c.append(el("span", { className: "addr", textContent: short(address), title: address }));
+  if (extra) c.append(extra);
+  c.append(copyBtn, el("a", { className: "go", href: `${loraBase()}/account/${address}`, target: "_blank", rel: "noopener", textContent: "↗", title: "Open on lora" }));
+  return c;
+}
+
+function renderWallets() {
+  const box = $("wallets");
+  box.replaceChildren();
+  if (!wallets) return;
+  let bal;
+  if (wallets.buyer && wallets.buyer.usdc !== null) bal = el("span", { className: "bal" + (wallets.buyer.usdc <= 0 ? " low" : ""), textContent: `${wallets.buyer.usdc} USDC` });
+  box.append(chip("Buyer", wallets.buyer?.address, bal), chip("Pay to", wallets.payTo?.address));
+  const price = wallets.prices?.chat;
+  $("execBtn").textContent = price ? `Execute · $${price}` : "Execute";
+}
+
+async function loadWallets() {
+  try { wallets = await (await fetch("/api/wallets")).json(); } catch { wallets = null; }
+  renderWallets();
+}
+
+/* ---------- steps ---------- */
+function setStep(n) {
+  for (const i of [1, 2, 3]) { const li = $("s" + i); li.className = i < n ? "done" : i === n ? "on" : ""; }
+}
+
+/* ---------- a small, safe Markdown view for the answer: text nodes only ---------- */
+const INLINE = /(\*\*[^*\n]+\*\*|`[^`\n]+`|\*[^*\s][^*\n]*\*)/;
+function inline(text, parent) {
+  for (const part of text.split(INLINE)) {
+    if (!part) continue;
+    if (part.length > 4 && part.startsWith("**") && part.endsWith("**")) parent.append(el("strong", { textContent: part.slice(2, -2) }));
+    else if (part.length > 2 && part.startsWith("`") && part.endsWith("`")) parent.append(el("code", { textContent: part.slice(1, -1) }));
+    else if (part.length > 2 && part.startsWith("*") && part.endsWith("*")) parent.append(el("em", { textContent: part.slice(1, -1) }));
+    else parent.append(part);
+  }
+  return parent;
+}
+const LIST = /^\s*([-*+]|\d+[.)])\s+/;
+function markdown(src) {
+  const root = el("div");
+  const lines = String(src).replace(/\r\n/g, "\n").split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^```/.test(line)) { const code = []; i++; while (i < lines.length && !/^```/.test(lines[i])) code.push(lines[i++]); i++; root.append(el("pre", {}, el("code", { textContent: code.join("\n") }))); continue; }
+    if (!line.trim()) { i++; continue; }
+    const h = line.match(/^(#{1,3})\s+(.*)$/);
+    if (h) { root.append(inline(h[2], el("h" + h[1].length))); i++; continue; }
+    if (LIST.test(line)) { const list = el(/^\s*\d/.test(line) ? "ol" : "ul"); while (i < lines.length && LIST.test(lines[i])) list.append(inline(lines[i++].replace(LIST, ""), el("li"))); root.append(list); continue; }
+    if (/^>\s?/.test(line)) { const q = []; while (i < lines.length && /^>\s?/.test(lines[i])) q.push(lines[i++].replace(/^>\s?/, "")); root.append(inline(q.join(" "), el("blockquote"))); continue; }
+    const para = [];
+    while (i < lines.length && lines[i].trim() && !/^(```|#{1,3}\s|>)/.test(lines[i]) && !LIST.test(lines[i])) para.push(lines[i++]);
+    if (!para.length) para.push(lines[i++]);
+    const p = el("p"); para.forEach((t, k) => { if (k) p.append(el("br")); inline(t, p); }); root.append(p);
+  }
+  return root;
+}
+
+/** Highlight, in the rendered answer, every original value that was put back. */
+function markValues(root, values) {
+  const list = [...new Set(values)].filter((v) => v.length > 2).sort((a, b) => b.length - a.length);
+  if (!list.length) return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n);
+  for (const node of nodes) {
+    const text = node.nodeValue;
+    const out = [];
+    let at = 0;
+    for (;;) {
+      let best = -1, found = "";
+      for (const v of list) { const i = text.indexOf(v, at); if (i !== -1 && (best === -1 || i < best)) { best = i; found = v; } }
+      if (best === -1) break;
+      if (best > at) out.push(text.slice(at, best));
+      out.push(el("mark", { className: "orig", textContent: found }));
+      at = best + found.length;
+    }
+    if (!out.length) continue;
+    if (at < text.length) out.push(text.slice(at));
+    node.replaceWith(...out);
+  }
+}
+
+/* ---------- the three steps ---------- */
+const pill = (t, cls = "") => el("span", { className: "pill " + cls, textContent: t });
+const clearStatus = () => $("status").replaceChildren();
+function showBusy(text) { $("status").replaceChildren(el("div", { className: "busy" }, el("span", { className: "spin" }), text)); }
+function showError(message, status) {
+  const box = el("div", { className: "error", role: "alert" }, message);
+  if (status === 402 || /USDC/.test(message)) box.append(" ", el("a", { href: "https://faucet.circle.com", target: "_blank", rel: "noopener", textContent: "Get TestNet USDC" }));
+  $("status").replaceChildren(box);
+}
+
+function doMask() {
+  clearStatus();
+  $("answerPane").hidden = true;
+  const text = $("msg").value.trim();
+  if (!text) { showError("Write a message first, or press “Try an example”."); return; }
+  const r = maskText(text);
+  current = { masked: r.masked, map: r.map };
+  const view = $("maskedView");
+  view.replaceChildren();
+  r.masked.split(PLACEHOLDER).forEach((part, i) => view.append(i % 2 ? el("mark", { className: "ph", textContent: part }) : part));
+  const pills = $("maskedPills");
+  pills.replaceChildren();
+  const kinds = Object.entries(r.counts);
+  if (kinds.length === 0 && r.cardsRemoved === 0) pills.append(pill("Nothing sensitive found", "good"));
+  for (const [type, n] of kinds) { const [one, many] = KIND[type] ?? [type.toLowerCase().replaceAll("_", " "), type.toLowerCase().replaceAll("_", " ")]; pills.append(pill(`${n} ${n === 1 ? one : many} hidden`, "good")); }
+  if (r.cardsRemoved > 0) pills.append(pill(`${r.cardsRemoved} card number removed for good`, "good"));
+  pills.append(pill("nothing has left your device"));
+  $("maskedPane").hidden = false;
+  setStep(2);
+  $("execBtn").focus({ preventScroll: true });
+}
+
+async function doExecute() {
+  if (!current) return;
+  $("execBtn").disabled = true;
+  showBusy("Paying with USDC and asking the model…");
+  try {
+    const r = await fetch("/api/execute", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ masked: current.masked }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { showError(j.error?.message ?? `Something went wrong (HTTP ${r.status}).`, r.status); return; }
+    clearStatus();
+    showAnswer(j);
+  } catch {
+    showError("Could not reach PrivacyBuddy's server. Is it running?");
+  } finally {
+    $("execBtn").disabled = false;
+    loadWallets();
+  }
+}
+
+function showAnswer(j) {
+  const restored = restore(j.answer, current.map);
+  const view = $("answerView");
+  view.replaceChildren(markdown(restored.text));
+  markValues(view, Object.values(current.map));
+  const pills = $("answerPills");
+  pills.replaceChildren(pill("your original values are back", "good"));
+  if (j.model) pills.append(pill(`model: ${j.model}`));
+  if (j.dataClass) pills.append(pill(`data class: ${j.dataClass}`));
+  const receipt = $("receipt");
+  receipt.replaceChildren();
+  const price = wallets?.prices?.chat;
+  receipt.append(price ? `Paid ${price} USDC · ` : "Paid · ");
+  if (j.payment?.transaction) receipt.append("receipt ", el("a", { href: `${loraBase()}/transaction/${j.payment.transaction}`, target: "_blank", rel: "noopener" }, el("code", { textContent: `${j.payment.transaction.slice(0, 8)}…${j.payment.transaction.slice(-6)}` }), " ↗"));
+  else receipt.append("the receipt was not returned");
+  receipt.hidden = false;
+  $("answerPane").hidden = false;
+  setStep(3);
+  $("answerPane").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function reset(keepText) {
+  current = null;
+  clearStatus();
+  $("maskedPane").hidden = true;
+  $("answerPane").hidden = true;
+  if (!keepText) $("msg").value = "";
+  setStep(1);
+  $("msg").focus();
+}
+
+$("maskBtn").onclick = doMask;
+$("exampleBtn").onclick = () => { reset(false); $("msg").value = EXAMPLE; doMask(); };
+$("execBtn").onclick = doExecute;
+$("editBtn").onclick = () => reset(true);
+$("againBtn").onclick = () => reset(false);
+$("msg").addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") doMask(); });
+
+loadWallets();
+setInterval(loadWallets, 60000);
+</script>
+</body>
+</html>

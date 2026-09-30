@@ -1,0 +1,22 @@
+{
+  "name": "@chainaim/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PrivacyBuddy: a web page for private chat, masked on the device and paid per answer with x402.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.22"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --test --test-force-exit \"test/*.test.ts\""
+  },
+  "dependencies": {
+    "@algorandfoundation/algokit-utils": "10.0.0-alpha.42",
+    "@hono/node-server": "2.1.1",
+    "@x402/avm": "2.27.0",
+    "@x402/core": "2.27.0",
+    "@x402/fetch": "2.27.0",
+    "hono": "4.13.9"
+  }
+}
