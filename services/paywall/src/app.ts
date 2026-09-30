@@ -17,6 +17,7 @@ import { ExactAvmScheme } from "@x402/avm/exact/server";
 import { HTTPFacilitatorClient } from "@x402/core/server";
 import { bazaarResourceServerExtension } from "@x402-avm/extensions";
 import type { PaywallConfig } from "./config.ts";
+import { paymentKey, ReplayGuard } from "./replay.ts";
 import { PAID_ROUTES, routesConfig } from "./routes.ts";
 
 /** The same limit as the gateway's default --max-body-bytes. */
@@ -25,7 +26,7 @@ export const MAX_BODY_BYTES = 4 * 1024 * 1024;
 /** Gateway response headers passed back to the caller; everything else is dropped. */
 const PASS_BACK = /^(content-type|retry-after|x-chainaim-[a-z-]+)$/;
 
-export type PaywallDeps = { log?: (line: string) => void };
+export type PaywallDeps = { log?: (line: string) => void; now?: () => number; maxReplayEntries?: number };
 
 function errorBody(c: Context, status: 404 | 413 | 502 | 503, message: string, headers: Record<string, string> = {}): Response {
   return c.json({ error: { message, type: status >= 500 ? "gateway_error" : "invalid_request_error", code: status } }, status, headers);
@@ -35,6 +36,12 @@ export function createPaywall(config: PaywallConfig, deps: PaywallDeps = {}): Ho
   const log = deps.log ?? ((line: string) => console.log(line));
   const server = new x402ResourceServer(new HTTPFacilitatorClient({ url: config.facilitatorUrl })).register(config.network, new ExactAvmScheme());
   server.registerExtension(bazaarResourceServerExtension as never);
+  // A payment is accepted once: a refused call is never settled, so nothing else stops a replay from draining the free-model quota.
+  const replays = new ReplayGuard(deps.now, deps.maxReplayEntries);
+  server.onBeforeVerify(async (ctx) => {
+    if (replays.claim(paymentKey(ctx.paymentPayload.payload))) return;
+    return { abort: true, reason: "payment_already_used", message: "this payment was already presented; sign a new one" };
+  });
   // Payment log: one line per settled payment; never a decision id or a body.
   server.onAfterSettle(async (ctx) => {
     const request = (ctx.transportContext as { request?: { method?: string; path?: string } } | undefined)?.request;

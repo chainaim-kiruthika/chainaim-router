@@ -72,8 +72,9 @@ export type TextMapper = (text: string, context: string) => string;
  * text of its own, visited before its value, because a model can put an
  * identifier in a key; the value is read with the original key as context.
  * Two keys that mask to the same placeholder become one key (that object
- * loses a value; nothing leaks). Arguments holding an integer that JSON.parse
- * would round are scanned whole instead. Fields other than role, content,
+ * loses a value; nothing leaks). An integer that JSON.parse would round is
+ * read from its source digits, and goes on unchanged unless it is masked.
+ * Fields other than role, content,
  * tool_calls and tool_call_id are dropped, so no unscanned text can ride along.
  */
 export function mapConversation(messages: readonly Message[], fn: TextMapper): Message[] {
@@ -97,26 +98,35 @@ export function mapConversation(messages: readonly Message[], fn: TextMapper): M
 function mapArguments(args: string, fn: TextMapper): string {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(args);
+    parsed = JSON.parse(args, keepUnsafeInteger);
   } catch {
     return fn(args, "");
   }
-  // A 16 to 19 digit card number sent as a bare number would reach detection with changed digits.
-  if (hasUnsafeInteger(parsed)) return fn(args, "");
   return JSON.stringify(mapJson(parsed, "", fn));
 }
 
-/** True when the value holds an integer beyond 2^53, which JSON.parse has rounded. */
-function hasUnsafeInteger(value: unknown): boolean {
-  if (typeof value === "number") return Number.isInteger(value) && !Number.isSafeInteger(value);
-  if (Array.isArray(value)) return value.some(hasUnsafeInteger);
-  if (typeof value === "object" && value !== null) return Object.values(value).some(hasUnsafeInteger);
-  return false;
+/** An integer beyond 2^53 with the digits as sent: JSON.parse would round it, and a card number must reach detection intact. */
+class UnsafeInteger {
+  readonly source: string;
+  constructor(source: string) {
+    this.source = source;
+  }
+}
+
+function keepUnsafeInteger(_key: string, value: unknown, context: { source?: string }): unknown {
+  if (typeof value === "number" && Number.isInteger(value) && !Number.isSafeInteger(value) && context.source !== undefined) {
+    return new UnsafeInteger(context.source);
+  }
+  return value;
 }
 
 function mapJson(value: unknown, key: string, fn: TextMapper): unknown {
   const context = key ? `${key}: ` : "";
   if (typeof value === "string") return fn(value, context);
+  if (value instanceof UnsafeInteger) {
+    const mapped = fn(value.source, context);
+    return mapped === value.source ? JSON.rawJSON(value.source) : mapped; // unchanged: the digits as sent; masked: a string
+  }
   if (typeof value === "number") {
     const text = String(value);
     const mapped = fn(text, context);

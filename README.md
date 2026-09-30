@@ -38,11 +38,11 @@ OR_DUMMY=sk-or-dummy node services/gateway/src/main.ts --model-source openrouter
 node scripts/smoke.ts --chat
 ```
 
-The paywall in front of it (TestNet, a made-up payTo; nothing is paid locally):
+The paywall in front of it (TestNet; replace `YOUR_TESTNET_ADDRESS` with a real Algorand address of yours, 58 characters with a valid checksum, for example one from `node scripts/new-account.ts`; nothing is paid locally):
 
 ```bash
 cd services/paywall && npm install
-AVM_PAY_TO=IDNTKBLAMSMIBR5DV5GRRZC7PNDOGRUOSOLHZ7BIOVXJPOWT2O24BMVDPE GATEWAY_URL=http://127.0.0.1:8700 CHAINAIM_GATEWAY_KEY=local HOST=127.0.0.1 npm start
+AVM_PAY_TO=YOUR_TESTNET_ADDRESS GATEWAY_URL=http://127.0.0.1:8700 CHAINAIM_GATEWAY_KEY=local HOST=127.0.0.1 npm start
 node scripts/pay.ts --dry-run http://127.0.0.1:8080/v1/privacy/scan '{"text":"Jane Roe"}'
 ```
 
