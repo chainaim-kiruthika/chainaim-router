@@ -30,6 +30,33 @@
   th { color: var(--muted); font-weight: 600; }
   .ph { color: var(--accent); font-weight: 600; }
   .err { color: var(--warn); }
+  .muted { color: var(--muted); }
+  .pick { margin-top: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+  .pick input[type=file] { font: inherit; color: var(--muted); max-width: 100%; }
+  a { color: var(--accent); }
+  mark.ent { --c: var(--muted); background: color-mix(in srgb, var(--c) 20%, transparent); box-shadow: inset 0 -2px 0 var(--c); color: inherit; padding: 0 2px; border-radius: 3px; }
+  .doc { background: var(--code); border-radius: 8px; padding: 12px 14px; white-space: pre-wrap; word-break: break-word; line-height: 1.75; max-height: 340px; overflow: auto; font: inherit; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .legend .pill { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+  .legend i { --c: var(--muted); width: 9px; height: 9px; border-radius: 50%; background: var(--c); display: inline-block; }
+  .chat { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+  .bubble { max-width: min(46rem, 94%); padding: 10px 14px; border: 1px solid var(--line); border-radius: 14px; }
+  .bubble.you { align-self: flex-end; background: var(--code); border-bottom-right-radius: 4px; white-space: pre-wrap; word-break: break-word; }
+  .bubble.ai { align-self: flex-start; background: var(--card); border-bottom-left-radius: 4px; }
+  .bubble .who { font-size: clamp(0.7rem, 0.68rem + 0.1vw, 0.75rem); text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 4px; white-space: normal; }
+  .md { line-height: 1.6; }
+  .md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
+  .md p, .md ul, .md ol, .md pre, .md blockquote { margin: 0 0 .7em; }
+  .md ul, .md ol { padding-left: 1.4em; }
+  .md h1, .md h2, .md h3 { font-size: 1rem; margin: .8em 0 .4em; }
+  .md code { background: var(--code); padding: 1px 5px; border-radius: 4px; font: .86em ui-monospace, Consolas, monospace; }
+  .md pre code { background: none; padding: 0; }
+  .md blockquote { padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
+  table.kv th { width: 9rem; white-space: nowrap; }
+  .addr { font: clamp(0.78rem, 0.75rem + 0.15vw, 0.82rem)/1.5 ui-monospace, Consolas, monospace; word-break: break-all; }
+  .small { font-size: .85em; color: var(--muted); }
+  details.behind { margin-top: 14px; } details.behind > summary { cursor: pointer; color: var(--muted); }
+  .scroll { overflow-x: auto; }
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   @media (max-width: 720px) { .row { grid-template-columns: 1fr; } }
 </style>
@@ -37,19 +64,21 @@
 <body>
 <main>
   <h1>ChainAim test console</h1>
-  <p class="note">Everything runs on this PC: the real Presidio scanner in Docker, and the gateway and paywall built from <code>main</code>. The "model" is a stand-in that echoes what it received, so no real model is called and nothing leaves this computer. The paywall runs on TestNet, and no payment is made.</p>
+  <p class="note">Everything runs on this PC: the real Presidio scanner in Docker, and the gateway and paywall built from <code>main</code>. By default the "model" is a stand-in that echoes what it received, so no real model is called and nothing leaves this computer. After <code>use-real-models.cmd</code>, chat goes to OpenRouter's free models, and they receive only the masked text. The paywall runs on TestNet, and no payment is made.</p>
 
   <section>
     <h2>1. Scan and mask</h2>
     <textarea id="text">Patient Rahul Verma (MRN 4471902) emailed dr.emily.carter@clinic-example.org and called 415-555-0199 about his insulin. Card 4111 1111 1111 1111.</textarea>
-    <button id="scan">Scan ($0.002)</button><button id="mask">Mask ($0.003)</button>
+    <div class="pick"><label>Attach a text file <input type="file" id="file1" accept=".txt,.md,.csv,.tsv,.json,.log,.xml,.html,.yml,.yaml,.pdf,text/*,application/pdf"></label><span class="muted" id="file1Info"></span></div>
+    <button id="scan">Scan ($0.01)</button><button id="mask">Mask ($0.01)</button>
     <div class="out" id="pmOut"></div>
   </section>
 
   <section>
     <h2>2. Private chat</h2>
     <textarea id="msg">Please remind Rahul Verma (MRN 4471902) that his insulin refill is ready, and email him at rahul.verma@example.net.</textarea>
-    <button id="send">Send ($0.01)</button>
+    <div class="pick"><label>Attach a text file <input type="file" id="file2" accept=".txt,.md,.csv,.tsv,.json,.log,.xml,.html,.yml,.yaml,.pdf,text/*,application/pdf"></label><span class="muted" id="file2Info"></span></div>
+    <button id="send">Send ($0.01)</button><button class="ghost" id="tryMedia">Try an image or PDF (refused)</button><input type="file" id="media" accept="image/*,.pdf,application/pdf" hidden>
     <div class="out" id="chatOut"></div>
   </section>
 
@@ -78,8 +107,157 @@ async function call(url, body) {
   const res = await fetch(url, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   return res.json();
 }
-async function busy(button, fn) { button.disabled = true; try { await fn(); } catch (e) { alert(e.message); } finally { button.disabled = false; } }
+const SERVER = "http://127.0.0.1:8730";
+async function busy(button, fn) {
+  button.disabled = true;
+  try { await fn(); }
+  catch (e) { alert(/failed to fetch|failed to parse url|networkerror/i.test(e.message) ? `Can't reach the test console server. Open ${SERVER} in your browser, and check that the "ChainAim test console" window is still open (start.cmd).` : e.message); }
+  finally { button.disabled = false; }
+}
+// Opened straight from disk (or from an editor preview), the buttons have no server to talk to.
+if (location.protocol !== "http:") document.body.prepend(el("p", { className: "err", style: "margin:0;padding:10px 16px;border-bottom:1px solid var(--line)" }, "This page was opened from a file, so its buttons can't reach the server. Open ", el("a", { href: SERVER, textContent: SERVER }), " instead (start.cmd must be running)."));
 const classPill = (dc) => pill("data class: " + dc, dc === "PHI" ? "phi" : dc === "none" ? "good" : "");
+
+// Colour by kind of data: blue people, amber contact details, red health, magenta cards, purple IDs.
+const typeColor = (t) => /^PERSON$/.test(t) ? "#4f7cff" : /EMAIL|PHONE|URL|IP_ADDRESS|LOCATION|ADDRESS/.test(t) ? "#d99a00" : /MEDICAL|HEALTH/.test(t) ? "#e5484d" : /CARD|IBAN|BANK|CRYPTO/.test(t) ? "#c2388f" : /AADHAAR|PAN|SSN|PASSPORT|LICENSE|ID/.test(t) ? "#8e5bd9" : "#6b7a90";
+const mark = (text, type) => { const m = el("mark", { className: "ent", title: type, textContent: text }); m.style.setProperty("--c", typeColor(type)); return m; };
+function highlighted(text, spans) {
+  const box = el("div", { className: "doc" });
+  let at = 0;
+  for (const s of [...spans].sort((a, b) => a.start - b.start)) {
+    if (s.start < at || s.end > text.length || s.end <= s.start) continue;
+    box.append(text.slice(at, s.start), mark(text.slice(s.start, s.end), s.type));
+    at = s.end;
+  }
+  box.append(text.slice(at));
+  return box;
+}
+const luhn = (digits) => { let sum = 0; [...digits].reverse().forEach((c, i) => { let n = +c; if (i % 2) { n *= 2; if (n > 9) n -= 9; } sum += n; }); return digits.length >= 13 && sum % 10 === 0; };
+function legend(counts) {
+  const row = el("div", { className: "legend" });
+  for (const [type, n] of Object.entries(counts ?? {})) { const dot = el("i"); dot.style.setProperty("--c", typeColor(type)); row.append(el("span", { className: "pill" }, dot, `${type} ×${n}`)); }
+  return row;
+}
+
+// A small, safe Markdown renderer: everything is built as text nodes, never as HTML, because model output is untrusted.
+const INLINE = /(\*\*[^*\n]+\*\*|`[^`\n]+`|\*[^*\s][^*\n]*\*)/;
+function inline(text, parent) {
+  for (const part of text.split(INLINE)) {
+    if (!part) continue;
+    if (part.length > 4 && part.startsWith("**") && part.endsWith("**")) parent.append(el("strong", { textContent: part.slice(2, -2) }));
+    else if (part.length > 2 && part.startsWith("`") && part.endsWith("`")) parent.append(el("code", { textContent: part.slice(1, -1) }));
+    else if (part.length > 2 && part.startsWith("*") && part.endsWith("*")) parent.append(el("em", { textContent: part.slice(1, -1) }));
+    else parent.append(part);
+  }
+  return parent;
+}
+const LIST = /^\s*([-*+]|\d+[.)])\s+/;
+function markdown(src) {
+  const root = el("div", { className: "md" });
+  const lines = String(src).replace(/\r\n/g, "\n").split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^```/.test(line)) { const code = []; i++; while (i < lines.length && !/^```/.test(lines[i])) code.push(lines[i++]); i++; root.append(el("pre", {}, el("code", { textContent: code.join("\n") }))); continue; }
+    if (!line.trim()) { i++; continue; }
+    const h = line.match(/^(#{1,3})\s+(.*)$/);
+    if (h) { root.append(inline(h[2], el("h" + h[1].length))); i++; continue; }
+    if (LIST.test(line)) { const list = el(/^\s*\d/.test(line) ? "ol" : "ul"); while (i < lines.length && LIST.test(lines[i])) list.append(inline(lines[i++].replace(LIST, ""), el("li"))); root.append(list); continue; }
+    if (/^>\s?/.test(line)) { const q = []; while (i < lines.length && /^>\s?/.test(lines[i])) q.push(lines[i++].replace(/^>\s?/, "")); root.append(inline(q.join(" "), el("blockquote"))); continue; }
+    const para = [];
+    while (i < lines.length && lines[i].trim() && !/^(```|#{1,3}\s|>)/.test(lines[i]) && !LIST.test(lines[i])) para.push(lines[i++]);
+    if (!para.length) para.push(lines[i++]);
+    const p = el("p"); para.forEach((t, k) => { if (k) p.append(el("br")); inline(t, p); }); root.append(p);
+  }
+  return root;
+}
+const bubble = (who, name, body) => el("div", { className: "bubble " + who }, el("div", { className: "who", textContent: name }), body);
+
+// Files are read in the browser and their text is put in the box; nothing is sent until a button is clicked.
+// The gateway takes text only. A PDF's text is extracted here (pdf.js, loaded from cdnjs the first time you pick a PDF);
+// the gateway never receives the PDF itself, and the button in section 2 shows it refusing one.
+const TEXT_FILE = /\.(txt|md|csv|tsv|json|log|xml|html?|ya?ml)$/i;
+const PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
+let pdfjsReady;
+function loadPdfjs() {
+  pdfjsReady ??= new Promise((ok, no) => {
+    const s = el("script", { src: PDFJS + "pdf.min.js" });
+    s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + "pdf.worker.min.js"; ok(window.pdfjsLib); };
+    s.onerror = () => { pdfjsReady = undefined; no(new Error("could not load the PDF reader (it needs an internet connection the first time).")); };
+    document.head.append(s);
+  });
+  return pdfjsReady;
+}
+async function pdfText(file) {
+  const lib = await loadPdfjs();
+  const pdf = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const pages = [];
+  for (let n = 1; n <= pdf.numPages; n++) {
+    const items = (await (await pdf.getPage(n)).getTextContent()).items.filter((i) => typeof i.str === "string" && i.str !== "");
+    const rows = new Map(); // one row per baseline, read left to right, top to bottom
+    for (const it of items) { const y = Math.round(it.transform[5]); if (!rows.has(y)) rows.set(y, []); rows.get(y).push(it); }
+    const ys = [...rows.keys()].sort((a, b) => b - a);
+    const gaps = ys.slice(1).map((y, i) => ys[i] - y);
+    const line = Math.min(...gaps, Infinity);
+    const out = [];
+    ys.forEach((y, i) => {
+      if (i && Number.isFinite(line) && ys[i - 1] - y > line * 1.6) out.push(""); // a blank line where the page had one
+      out.push(rows.get(y).sort((a, b) => a.transform[4] - b.transform[4]).map((t) => t.str).join(" ").trim());
+    });
+    pages.push(out.join("\n"));
+  }
+  return { text: pages.join("\n\n"), pages: pdf.numPages };
+}
+function attach(inputId, areaId, infoId, limit, below) {
+  $(inputId).onchange = async (ev) => {
+    const file = ev.target.files[0]; ev.target.value = "";
+    const info = $(infoId);
+    if (!file) return;
+    const refuse = (why) => { info.className = "err"; info.textContent = `${file.name}: ${why}`; };
+    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+    if (!isPdf && !file.type.startsWith("text/") && !TEXT_FILE.test(file.name)) return refuse("only text files and PDFs can be loaded. The gateway refuses images.");
+    let text, from = "";
+    if (isPdf) {
+      info.className = "muted"; info.textContent = `${file.name}: reading the PDF in your browser…`;
+      try { const r = await pdfText(file); text = r.text; from = `, extracted from ${r.pages} page${r.pages === 1 ? "" : "s"} in your browser`; }
+      catch (e) { return refuse(e.message || "could not read this PDF."); }
+      if (!text.trim()) return refuse("no text found. It may be a scan (an image), which the gateway cannot read.");
+    } else {
+      text = await file.text();
+      if (text.includes("\u0000")) return refuse("this looks like a binary file, not text.");
+    }
+    const area = $(areaId);
+    area.value = below ? area.value.replace(/\s+$/, "") + "\n\n" + text : text;
+    const over = text.length > limit;
+    info.className = over ? "err" : "muted";
+    info.textContent = `${file.name}: ${text.length.toLocaleString()} characters ${below ? "added below your question" : "loaded"}${from}. ` +
+      (over ? `Over the limit of ${limit.toLocaleString()}, so the gateway will refuse it.` : "Nothing is sent until you click a button.");
+  };
+}
+attach("file1", "text", "file1Info", 20000, false);
+attach("file2", "msg", "file2Info", 48000, true);
+
+$("tryMedia").onclick = () => $("media").click();
+$("media").onchange = (ev) => {
+  const file = ev.target.files[0]; ev.target.value = "";
+  if (!file) return;
+  busy($("tryMedia"), async () => {
+    if (file.size > 2_000_000) return alert("Pick a file under 2 MB.");
+    const url = await new Promise((ok, no) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = no; fr.readAsDataURL(file); });
+    const part = file.type.startsWith("image/") ? { type: "image_url", image_url: { url } } : { type: "file", file: { filename: file.name, file_data: url } };
+    const r = await call("/gateway/chat", { messages: [{ role: "user", content: [{ type: "text", text: $("msg").value }, part] }] });
+    $("chatOut").replaceChildren(pill(`${file.name}: HTTP ${r.status}`, r.status === 400 ? "good" : "phi"), label("What the gateway said"),
+      pre(r.body?.error?.message ?? (r.status === 200 ? "It was accepted." : JSON.stringify(r.body))));
+  });
+};
+
+// The button labels show what the paywall actually quotes for each route (PRICE_SCAN, PRICE_MASK, PRICE_CHAT), so they never go stale.
+// The text in the HTML is only the fallback while the paywall does not answer.
+(async () => {
+  for (const [route, id, verb] of [["scan", "scan", "Scan"], ["mask", "mask", "Mask"], ["chat", "send", "Send"]]) {
+    try { const price = (await call("/paywall/" + route)).accepts?.[0]?.price; if (price !== undefined) $(id).textContent = `${verb} ($${price})`; } catch { /* keep the fallback text */ }
+  }
+})();
 
 $("scan").onclick = () => busy($("scan"), async () => {
   const text = $("text").value;
@@ -87,18 +265,30 @@ $("scan").onclick = () => busy($("scan"), async () => {
   const out = $("pmOut"); out.replaceChildren();
   if (r.status !== 200) return out.append(el("p", { className: "err", textContent: `HTTP ${r.status}: ${r.body?.error?.message ?? ""}` }));
   const b = r.body;
-  out.append(classPill(b.dataClass), pill("policy: data collection " + (b.policy?.dataCollection ?? "?")), label("Entities found"));
+  out.append(classPill(b.dataClass), pill("policy: data collection " + (b.policy?.dataCollection ?? "?")),
+    label("Preview: what ChainAim found in your text"), highlighted(text, b.entities ?? []), legend(b.counts), label("Entities found"));
   const t = el("table"); t.append(el("tr", {}, el("th", { textContent: "Type" }), el("th", { textContent: "Text" }), el("th", { textContent: "Score" })));
   for (const e of b.entities ?? []) t.append(el("tr", {}, el("td", { textContent: e.type }), el("td", { textContent: text.slice(e.start, e.end) }), el("td", { textContent: e.score.toFixed(2) })));
   out.append((b.entities ?? []).length ? t : el("p", { textContent: "none" }));
 });
 
 $("mask").onclick = () => busy($("mask"), async () => {
-  const r = await call("/gateway/mask", { text: $("text").value });
+  const text = $("text").value;
+  const r = await call("/gateway/mask", { text });
   const out = $("pmOut"); out.replaceChildren();
   if (r.status !== 200) return out.append(el("p", { className: "err", textContent: `HTTP ${r.status}: ${r.body?.error?.message ?? ""}` }));
   const b = r.body;
-  out.append(classPill(b.dataClass), pill("cards removed: " + b.cardsRemoved), label("Masked text (what a model could see)"), withPlaceholders(b.maskedText), label("Map to restore it (only the caller gets this)"));
+  // Highlight each value that was replaced, wherever it appears in the original.
+  const spans = [];
+  for (const [ph, value] of Object.entries(b.map ?? {})) {
+    const type = ph.replace(/^<|_\d+>$/g, "");
+    for (let at = text.indexOf(value); value && at !== -1; at = text.indexOf(value, at + value.length)) spans.push({ start: at, end: at + value.length, type });
+  }
+  // Removed card numbers are not in the map, so find card-shaped numbers that pass the Luhn check.
+  if (b.cardsRemoved) { let left = b.cardsRemoved; for (const m of text.matchAll(/\b\d(?:[ -]?\d){12,18}\b/g)) if (left && luhn(m[0].replace(/\D/g, ""))) { spans.push({ start: m.index, end: m.index + m[0].length, type: "CREDIT_CARD" }); left--; } }
+  const masked = withPlaceholders(b.maskedText); masked.classList.add("doc");
+  const cols = el("div", { className: "row" }, el("div", {}, label("Original (what you typed)"), highlighted(text, spans)), el("div", {}, label("Masked (what a model could see)"), masked));
+  out.append(classPill(b.dataClass), pill("cards removed: " + b.cardsRemoved), cols, legend(b.counts), label("Map to restore it (only the caller gets this)"));
   const t = el("table"); for (const [k, v] of Object.entries(b.map ?? {})) t.append(el("tr", {}, el("td", { className: "ph", textContent: k }), el("td", { textContent: v })));
   out.append(Object.keys(b.map ?? {}).length ? t : el("p", { textContent: "empty" }));
 });
@@ -113,31 +303,61 @@ $("send").onclick = () => busy($("send"), async () => {
   if (r.status !== 200) out.append(el("p", { className: "err", textContent: `HTTP ${r.status}: ${r.body?.error?.message ?? ""}` }));
   else {
     const h = r.headers;
+    // The stand-in's model ids start with "stub/": it only echoes the text, so say so instead of looking like a broken answer.
+    if ((h["x-chainaim-model"] ?? "").startsWith("stub/")) out.append(el("p", { className: "err", textContent: "Stand-in mode: this fake model only echoes your text back. For real answers, run use-real-models.cmd in the test-console folder and paste your OpenRouter key when it asks." }));
     out.append(classPill(h["x-chainaim-data-class"]), pill("classifier: " + h["x-chainaim-classifier"]), pill("model: " + h["x-chainaim-model"]),
-      label("Answer you get back (placeholders restored; the stand-in model echoes)"), pre(r.body.choices?.[0]?.message?.content ?? ""));
+      el("div", { className: "chat" },
+        bubble("you", "You", el("div", { textContent: $("msg").value })),
+        bubble("ai", "Answer (placeholders restored)", markdown(r.body.choices?.[0]?.message?.content ?? ""))));
   }
   const model = after.filter((s) => s.kind === "model");
   const jev = after.filter((s) => s.kind === "jev");
+  // An answered chat that the stand-in never saw means the real models are on: these two panels only record the stand-in.
+  const realMode = r.status === 200 && !model.length;
   const cols = el("div", { className: "row" });
   const m = el("div", {}, label("What left ChainAim to the model"));
   for (const s of model) { m.append(pill("data_collection: " + (s.body.provider?.data_collection ?? "?"), s.body.provider?.data_collection === "deny" ? "phi" : "")); for (const msg of s.body.messages ?? []) m.append(withPlaceholders(`[${msg.role}] ${typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content ?? msg.tool_calls)}`)); }
-  if (!model.length) m.append(el("p", { textContent: "nothing (no model was called)" }));
+  if (!model.length) m.append(el("p", { textContent: realMode ? "not shown: real models are on, and this panel only records the stand-in. The model received the masked text only." : "nothing recorded: the request was refused, so no model answered" }));
   const j = el("div", {}, label("What Jev received"));
-  if (jev.length) for (const s of jev) j.append(withPlaceholders(s.body.request)); else j.append(el("p", { textContent: "nothing (Jev is never called for health data)" }));
-  cols.append(m, j); out.append(cols);
+  if (jev.length) for (const s of jev) j.append(withPlaceholders(s.body.request)); else j.append(el("p", { textContent: realMode ? "not shown: real models are on, and this panel only records the stand-in." : "nothing (Jev is never called for health data)" }));
+  cols.append(m, j);
+  out.append(el("details", { className: "behind", open: true }, el("summary", { textContent: "Behind the scenes: what left ChainAim" }), cols));
 });
 
 for (const b of document.querySelectorAll("[data-route]")) b.onclick = () => busy(b, async () => {
   const r = await call("/paywall/" + b.dataset.route);
   const out = $("payOut"); out.replaceChildren();
   out.append(pill(`${b.dataset.route}: HTTP ${r.status}${r.status === 402 ? " payment required" : ""}`, r.status === 402 ? "good" : "phi"));
-  for (const a of r.accepts) out.append(pre(`price     ${a.price} USDC\nnetwork   ${a.network}\nasset     ${a.asset} (USDC)\npay to    ${a.payTo}\ntag       ${a.tag}\nbazaar    ${r.bazaar ? "listed" : "no"}`));
+  for (const a of r.accepts) {
+    const main = /wGHE2Pw/.test(a.network);
+    const lora = `https://lora.algokit.io/${main ? "mainnet" : "testnet"}`;
+    const link = (href, text, cls = "") => el("a", { href, target: "_blank", rel: "noopener", textContent: text, className: cls });
+    const row = (k, ...v) => el("tr", {}, el("th", { textContent: k }), el("td", {}, ...v));
+    out.append(el("div", { className: "scroll" }, el("table", { className: "kv" },
+      row("Price", `${a.price} USDC`),
+      row("Network", main ? "Algorand MainNet" : /SGO1GKS/.test(a.network) ? "Algorand TestNet" : a.network),
+      row("Asset", link(`${lora}/asset/${a.asset}`, `USDC (asset ${a.asset})`)),
+      row("Pay to", link(`${lora}/account/${a.payTo}`, a.payTo, "addr")),
+      row("Challenge tag", a.tag),
+      row("Bazaar", r.bazaar ? "discovery metadata is on" : "off", el("span", { className: "small", textContent: r.bazaar ? "  (the listing itself appears after the first settled payment)" : "" })))));
+  }
   if (r.body) out.append(pre(r.body));
 });
 
 $("ledger").onclick = () => busy($("ledger"), async () => {
   const r = await call("/ledger");
-  $("ledgerOut").replaceChildren(...r.lines.map((l) => pre(l)));
+  const rows = [...r.lines].reverse();
+  const t = el("table"); t.append(el("tr", {}, ...["Time (UTC)", "Route", "Class", "Found", "Model", "Status", "Took"].map((h) => el("th", { textContent: h }))));
+  for (const l of rows) {
+    if (typeof l === "string") { t.append(el("tr", {}, el("td", { colSpan: 7, textContent: l }))); continue; }
+    const tries = l.attempts ?? [], last = tries[tries.length - 1];
+    const took = l.latencyMs ?? (tries.length ? tries.reduce((n, a) => n + (a.ms ?? 0), 0) : undefined);
+    t.append(el("tr", {}, el("td", { textContent: (l.ts ?? "").slice(11, 19) }), el("td", { textContent: l.endpoint ?? "" }),
+      el("td", {}, l.dataClass ? classPill(l.dataClass) : "-"),
+      el("td", { textContent: Object.entries(l.entityCounts ?? {}).map(([k, v]) => `${k} ×${v}`).join(", ") || "-" }),
+      el("td", { textContent: last?.model ?? "-" }), el("td", { textContent: String(l.status ?? last?.status ?? "-") }), el("td", { textContent: took === undefined ? "-" : `${took} ms` })));
+  }
+  $("ledgerOut").replaceChildren(el("div", { className: "scroll" }, t), el("p", { className: "small", textContent: "Each line holds classes, counts and model names only. No text, no placeholders, no map." }));
 });
 </script>
 </body>

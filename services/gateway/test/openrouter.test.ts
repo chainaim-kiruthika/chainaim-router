@@ -37,6 +37,7 @@ describe("categorize", () => {
     ["key 401", 401, err("No auth credentials found"), "allow", { outcome: "key_rejected" }],
     ["key 403", 403, err("Key disabled"), "allow", { outcome: "key_rejected" }],
     ["moderation 403", 403, err("flagged", { reasons: ["x"], flagged_input: "..." }), "allow", { outcome: "upstream_error" }],
+    ["model gated 403 (routing ran, so the key was accepted)", 403, err("stub/x:free is only available on agentic harnesses", { routing_funnel: [{ step: "Initial Endpoints" }] }), "allow", { outcome: "model_restricted" }],
     ["server error", 500, "not json", "allow", { outcome: "upstream_error" }],
     ["bad request", 400, err("Invalid tool schema"), "allow", { outcome: "upstream_error" }],
   ];
@@ -121,6 +122,13 @@ describe("attemptChat against the stub OpenRouter", () => {
     const r = await attempt();
     assert.deepEqual([r.attempt.outcome, r.attempt.status], ["upstream_error", 403]);
     assert.equal(pool.isCoolingDown(MODEL), false);
+  });
+
+  it("cools a gated model down (403 after routing ran) without calling it a rejected key", async () => {
+    or.chatModes[MODEL] = "restricted403";
+    const r = await attempt();
+    assert.deepEqual([r.attempt.outcome, r.attempt.status], ["model_restricted", 403]);
+    assert.equal(pool.isCoolingDown(MODEL), true);
   });
 
   it("cools a model down when OpenRouter has no endpoint for it (404)", async () => {

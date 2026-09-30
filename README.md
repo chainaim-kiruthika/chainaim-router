@@ -14,12 +14,28 @@ Setup on your machine: `SETUP.md`. Design: `docs/superpowers/specs/2026-09-24-pr
 
 | Method | Path | Price | What it does |
 | --- | --- | --- | --- |
-| POST | /v1/privacy/scan | $0.002 | Entities (type, UTF-16 start/end, score), classes (PHI, PCI, PII) and the data policy. No model is called. |
-| POST | /v1/privacy/mask | $0.003 | Masked text (`<PERSON_1>`, `[CARD REMOVED]`), the map to restore it, counts |
+| POST | /v1/privacy/scan | $0.01 | Entities (type, UTF-16 start/end, score), classes (PHI, PCI, PII) and the data policy. No model is called. |
+| POST | /v1/privacy/mask | $0.01 | Masked text (`<PERSON_1>`, `[CARD REMOVED]`), the map to restore it, counts |
 | POST | /v1/chat/completions | $0.01 | Private chat: mask, classify with Jev, route across free models, restore the answer |
 | GET | /v1/models, /healthz | free | The model list; liveness |
 
+Each price is set on the paywall by `PRICE_SCAN`, `PRICE_MASK` and `PRICE_CHAT` (for example `$0.01`); an unset variable means $0.01. Changing a price needs no code change and does not affect the payTo address.
+
 Every refusal (4xx, 5xx) is free: the payment settles only when the gateway answers below 400. Chat asks for payment only when free-model capacity is available; any refusal after payment is free. Health data only goes to model providers that don't collect data; if none is available, the request is refused and not charged.
+
+## Mask on your own computer first (`private-ask`)
+
+`services/paywall/scripts/private-ask.ts` reads a text file and masks it **on your computer** before anything is sent: names after a label (`Patient:`, `Name:` at the start of a line, `Dr.`, `Mr./Mrs.`), Aadhaar, PAN, IFSC, card numbers (Luhn check), Indian mobile numbers, email addresses, and bank account and medical record numbers next to a label. It shows exactly what will leave, then pays over x402 and sends only the masked text. Placeholders look like `<C_PERSON_1>`; card numbers become `[CARD REMOVED]` and are never restored. Placeholders in the answer are put back on your computer, and the map never leaves it.
+
+The gateway still scans the masked text with Presidio as a second check, and counts each `<C_TYPE_n>` as the value it replaced, so a masked prescription keeps the no-collection policy for health data.
+
+```bash
+cd services/paywall
+node scripts/private-ask.ts --file prescription.txt --endpoint scan --dry-run
+AVM_MNEMONIC="<buyer's 25 words>" node scripts/private-ask.ts --file prescription.txt --url https://PAYWALL --endpoint chat
+```
+
+Flags: `--endpoint chat|scan|mask` (default chat), `--question`, `--max-tokens` (1 to 1024), `--dry-run` (sends and pays nothing), `--keep-masked`, `--no-names`. Limits: `.txt` and `.md` files only; the checks are patterns, not a language model, so a name without a label can be missed on the computer and is left to the gateway's scan. Diagnoses, drugs, ages, dates and places are not masked, because the model needs them or they are not detected.
 
 ## Gateway routes (private, behind the gateway key)
 

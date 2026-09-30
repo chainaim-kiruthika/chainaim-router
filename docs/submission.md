@@ -8,8 +8,8 @@
 
 **What it does.** Three x402 endpoints on one payTo address, paid in USDC on Algorand MainNet through the GoPlausible facilitator, and listed in the Bazaar with the tag `x402-global-challenge`:
 
-- **scan** ($0.002): finds personal, health and card data in a text and returns the entity types, positions, data class and data policy. No model is called.
-- **mask** ($0.003): replaces personal and health identifiers with numbered placeholders, removes card numbers, and returns the map to restore them.
+- **scan** ($0.01): finds personal, health and card data in a text and returns the entity types, positions, data class and data policy. No model is called.
+- **mask** ($0.01): replaces personal and health identifiers with numbered placeholders, removes card numbers, and returns the map to restore them.
 - **chat** ($0.01): an OpenAI-compatible chat. The conversation is masked before any model sees it. TypeSafe's Jev (through OpenRouter's Decisions API) classifies the masked request, a scoring table picks among OpenRouter's free models, and the original values are put back into the answer.
 
 **Privacy.**
@@ -18,6 +18,7 @@
 - Card numbers are removed, never restored.
 - The decision ledger records classes and counts, never text.
 - The paywall strips payment headers, so the gateway never learns who paid.
+- On the user's own computer first: the `private-ask` command masks identity numbers, card numbers and labelled names before anything is sent, and puts them back in the answer locally. The gateway scans again as a second check and keeps masked health data on no-collection providers. Names without a label and medical details still reach the gateway.
 
 **Why x402 is core.** Every call is a paid request with no accounts and no API keys: an agent discovers the service in the Bazaar and pays per call. Settlement happens only after a successful answer, so refusals are free.
 

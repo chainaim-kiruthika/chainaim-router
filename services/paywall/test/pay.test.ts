@@ -44,7 +44,7 @@ describe("scripts/pay.ts", () => {
   it("--dry-run shows the price, network, payTo and tag, and pays nothing", async () => {
     const r = await run(["--dry-run", `${paywall.url}/v1/privacy/scan`, JSON.stringify({ text: "hi" })]);
     assert.equal(r.code, 0, r.stderr);
-    assert.ok(r.stdout.includes("price 0.002 USDC (asset 10458941)"), r.stdout);
+    assert.ok(r.stdout.includes("price 0.01 USDC (asset 10458941)"), r.stdout);
     assert.ok(r.stdout.includes(`to ${PAY_TO}; tag=x402-global-challenge`), r.stdout);
     assert.ok(r.stdout.includes("bazaar=yes"), r.stdout);
     assert.ok(!facilitator.calls.includes("/verify") && !facilitator.calls.includes("/settle"), "nothing was verified or settled");

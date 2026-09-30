@@ -10,6 +10,7 @@ export type Outcome =
   | "rate_limited_provider"
   | "data_policy_unavailable"
   | "key_rejected"
+  | "model_restricted"
   | "upstream_error"
   | "timeout"
   | "network_error"
@@ -50,7 +51,7 @@ export const REQUEST_FAULTS: ReadonlySet<number> = new Set([400, 413, 422]);
 
 export type Categorized = { outcome: Outcome; accountScope?: "minute" | "day" };
 
-function errorOf(text: string): { message: string; providerName: string | undefined; moderation: boolean } {
+function errorOf(text: string): { message: string; providerName: string | undefined; moderation: boolean; routed: boolean } {
   try {
     const e = (JSON.parse(text) as { error?: { message?: unknown; metadata?: Record<string, unknown> } } | null)?.error;
     const meta = e?.metadata ?? {};
@@ -58,15 +59,19 @@ function errorOf(text: string): { message: string; providerName: string | undefi
       message: typeof e?.message === "string" ? e.message : "",
       providerName: typeof meta.provider_name === "string" ? meta.provider_name : undefined,
       moderation: "reasons" in meta || "flagged_input" in meta,
+      routed: "routing_funnel" in meta,
     };
   } catch {
-    return { message: "", providerName: undefined, moderation: false };
+    return { message: "", providerName: undefined, moderation: false, routed: false };
   }
 }
 
 export function categorize(status: number, text: string, dataCollection: DataCollection): Categorized {
   if (status >= 200 && status < 300) return { outcome: "ok" };
-  const { message, providerName, moderation } = errorOf(text);
+  const { message, providerName, moderation, routed } = errorOf(text);
+  // A 403 that carries routing metadata came after OpenRouter accepted the key and started routing, so it is about this
+  // model (for example "only available on agentic harnesses"), not the key. Any other 403 is still a rejected key.
+  if (status === 403 && !moderation && routed) return { outcome: "model_restricted" };
   if (status === 401 || (status === 403 && !moderation)) return { outcome: "key_rejected" };
   if (status === 429) {
     if (/free-models-per-day/i.test(message)) return { outcome: "rate_limited_account", accountScope: "day" };

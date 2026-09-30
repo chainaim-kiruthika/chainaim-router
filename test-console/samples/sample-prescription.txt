@@ -1,0 +1,26 @@
+SAMPLE MEDICAL PRESCRIPTION (SYNTHETIC: every name, number and address below is made up)
+
+Riverside Example Clinic. Date: 28 Sep 2026.
+
+Patient: Rahul Verma.
+
+Medical record number: MRN 4471902.
+
+Phone: +91 98450 11223
+
+Email: rahul.verma@example.net
+
+Doctor: Dr. Meera Iyer, General Physician.
+
+Diagnosis: type 2 diabetes and high blood pressure.
+
+Allergies: penicillin.
+
+Prescription:
+- Metformin 500 mg, one tablet twice a day after meals, for 30 days.
+- Amlodipine 5 mg, one tablet once a day in the morning, for 30 days.
+- Insulin glargine 10 units at bedtime.
+
+Follow-up: review in 4 weeks with a fasting blood sugar test and an HbA1c test.
+
+Questions about this prescription: call the clinic on +91 44 5550 0456 or write to reception@riverside-example-clinic.org.

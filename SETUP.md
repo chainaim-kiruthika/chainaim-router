@@ -60,12 +60,12 @@ npm --prefix packages/route-engine install
 ```bash
 npm test
 ```
-The gateway: 257 tests in about 5 seconds.
+The gateway: 260 tests in about 5 seconds.
 
 ```bash
 npm run test:paywall
 ```
-The paywall: 24 tests.
+The paywall: 39 tests.
 
 ```bash
 npm run test:engine
@@ -231,7 +231,7 @@ Expect `{"status":"ok"}`.
 curl -si -X POST http://127.0.0.1:8080/v1/privacy/scan -H "content-type: application/json" -d '{"text":"hi"}'
 ```
 Expect `HTTP/1.1 402 Payment Required` and a `payment-required` header: the
-paywall asks for 0.002 USDC before it runs a scan.
+paywall asks for 0.01 USDC before it runs a scan (set `PRICE_SCAN` to change it).
 
 Call the gateway directly, with its key:
 
@@ -263,7 +263,7 @@ nothing (run it from `services/paywall`):
 ```bash
 node scripts/pay.ts --dry-run http://127.0.0.1:8080/v1/privacy/scan '{"text":"Jane Roe"}'
 ```
-Expect: price 0.002 USDC, asset 10458941 (TestNet USDC), your address as
+Expect: price 0.01 USDC, asset 10458941 (TestNet USDC), your address as
 payTo, and `tag=x402-global-challenge`.
 
 A real TestNet payment (optional, free test money):
@@ -282,7 +282,7 @@ A real TestNet payment (optional, free test money):
    `payment {"success":true,"transaction":"<TX ID>",...}`. The paywall prints a
    `payment_settled` line with the same ID (`docker logs ca-paywall` in step
    6). Open `https://lora.algokit.io/testnet/transaction/<TX ID>`: it shows
-   0.002 USDC from the buyer to your payTo.
+   0.01 USDC from the buyer to your payTo.
 
 ## 8. Configuration
 
