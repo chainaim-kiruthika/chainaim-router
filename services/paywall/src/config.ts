@@ -12,6 +12,12 @@ export type NetworkName = keyof typeof NETWORKS;
 export const CHALLENGE_TAG = "x402-global-challenge";
 export const DEFAULT_FACILITATOR = "https://facilitator.goplausible.xyz";
 
+/** The paid routes, each priced by its own variable (PRICE_SCAN, PRICE_MASK, PRICE_CHAT). */
+export const PRICED = ["scan", "mask", "chat"] as const;
+export type Priced = (typeof PRICED)[number];
+/** Used for any route whose PRICE_* variable is unset. */
+export const DEFAULT_PRICE = "$0.01";
+
 export type PaywallConfig = {
   network: string;
   networkName: NetworkName;
@@ -27,6 +33,8 @@ export type PaywallConfig = {
   host: string;
   /** Public origin such as https://pay.example.com: the resource URL in 402s and the Bazaar. */
   publicBaseUrl: string | undefined;
+  /** USD price per call, e.g. "$0.01"; changeable without a code change. */
+  prices: Record<Priced, string>;
 };
 
 export function loadConfig(env: Record<string, string | undefined>): PaywallConfig {
@@ -41,6 +49,14 @@ export function loadConfig(env: Record<string, string | undefined>): PaywallConf
     const n = v === undefined ? fallback : Number(v);
     if (!Number.isInteger(n) || n < 0) throw new Error(`${name} must be a whole number, got ${v}`);
     return n;
+  };
+  /** A USD price with at most 6 decimals (USDC's precision), above zero. */
+  const price = (name: string): string => {
+    const v = value(name) ?? DEFAULT_PRICE;
+    if (!/^\$(0|[1-9]\d*)(\.\d{1,6})?$/.test(v) || Number(v.slice(1)) <= 0) {
+      throw new Error(`${name} must be a USD price above zero such as $0.01, got ${v}`);
+    }
+    return v;
   };
 
   const networkName = value("X402_NETWORK") ?? "testnet";
@@ -64,5 +80,6 @@ export function loadConfig(env: Record<string, string | undefined>): PaywallConf
     port: integer("PORT", 8080),
     host: value("HOST") ?? "0.0.0.0",
     publicBaseUrl,
+    prices: { scan: price("PRICE_SCAN"), mask: price("PRICE_MASK"), chat: price("PRICE_CHAT") },
   };
 }

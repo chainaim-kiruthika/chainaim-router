@@ -1,11 +1,12 @@
 /**
- * The three paid routes: price, description and Bazaar discovery metadata
- * (spec section 9). Every example here is synthetic.
+ * The three paid routes: description and Bazaar discovery metadata (spec
+ * section 9). Prices come from the configuration (PRICE_SCAN, PRICE_MASK,
+ * PRICE_CHAT). Every example here is synthetic.
  */
 import { declareDiscoveryExtension } from "@x402-avm/extensions";
-import { CHALLENGE_TAG, type PaywallConfig } from "./config.ts";
+import { CHALLENGE_TAG, type PaywallConfig, type Priced } from "./config.ts";
 
-export type PaidRoute = { key: string; path: string; price: string; description: string; discovery: Record<string, unknown> };
+export type PaidRoute = { key: string; path: string; priced: Priced; description: string; discovery: Record<string, unknown> };
 
 const EXAMPLE_TEXT = "Patient Jane Roe, MRN 991122, was diagnosed with diabetes.";
 const textSchema = (verb: string) => ({
@@ -18,7 +19,7 @@ export const PAID_ROUTES: readonly PaidRoute[] = [
   {
     key: "POST /v1/privacy/scan",
     path: "/v1/privacy/scan",
-    price: "$0.002",
+    priced: "scan",
     description: "Finds personal, health and card data in text and returns entity types, positions and the data class. No model is called.",
     discovery: declareDiscoveryExtension({
       bodyType: "json",
@@ -44,7 +45,7 @@ export const PAID_ROUTES: readonly PaidRoute[] = [
   {
     key: "POST /v1/privacy/mask",
     path: "/v1/privacy/mask",
-    price: "$0.003",
+    priced: "mask",
     description: "Replaces personal and health identifiers with numbered placeholders and removes card numbers. Returns the masked text and the map to restore it.",
     discovery: declareDiscoveryExtension({
       bodyType: "json",
@@ -66,7 +67,7 @@ export const PAID_ROUTES: readonly PaidRoute[] = [
   {
     key: "POST /v1/chat/completions",
     path: "/v1/chat/completions",
-    price: "$0.01",
+    priced: "chat",
     description: "OpenAI-compatible private chat. Masks the conversation, routes it with Jev across free models under a data policy set by what it contains, and restores the answer.",
     discovery: declareDiscoveryExtension({
       bodyType: "json",
@@ -118,13 +119,13 @@ export type RouteEntry = {
   extensions: Record<string, unknown>;
 };
 
-/** The route table for paymentMiddleware: one exact USDC price per route, the challenge tag, and the Bazaar metadata. */
+/** The route table for paymentMiddleware: one exact USDC price per route (from the configuration), the challenge tag, and the Bazaar metadata. */
 export function routesConfig(config: PaywallConfig): Record<string, RouteEntry> {
   return Object.fromEntries(
     PAID_ROUTES.map((r): [string, RouteEntry] => [
       r.key,
       {
-        accepts: [{ scheme: "exact", price: r.price, network: config.network, payTo: config.payTo, extra: { tag: CHALLENGE_TAG } }],
+        accepts: [{ scheme: "exact", price: config.prices[r.priced], network: config.network, payTo: config.payTo, extra: { tag: CHALLENGE_TAG } }],
         description: r.description,
         mimeType: "application/json",
         ...(config.publicBaseUrl ? { resource: `${config.publicBaseUrl}${r.path}` } : {}),

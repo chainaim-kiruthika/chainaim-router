@@ -14,10 +14,12 @@ Setup on your machine: `SETUP.md`. Design: `docs/superpowers/specs/2026-09-24-pr
 
 | Method | Path | Price | What it does |
 | --- | --- | --- | --- |
-| POST | /v1/privacy/scan | $0.002 | Entities (type, UTF-16 start/end, score), classes (PHI, PCI, PII) and the data policy. No model is called. |
-| POST | /v1/privacy/mask | $0.003 | Masked text (`<PERSON_1>`, `[CARD REMOVED]`), the map to restore it, counts |
+| POST | /v1/privacy/scan | $0.01 | Entities (type, UTF-16 start/end, score), classes (PHI, PCI, PII) and the data policy. No model is called. |
+| POST | /v1/privacy/mask | $0.01 | Masked text (`<PERSON_1>`, `[CARD REMOVED]`), the map to restore it, counts |
 | POST | /v1/chat/completions | $0.01 | Private chat: mask, classify with Jev, route across free models, restore the answer |
 | GET | /v1/models, /healthz | free | The model list; liveness |
+
+Each price is set on the paywall by `PRICE_SCAN`, `PRICE_MASK` and `PRICE_CHAT` (for example `$0.01`); an unset variable means $0.01. Changing a price needs no code change and does not affect the payTo address.
 
 Every refusal (4xx, 5xx) is free: the payment settles only when the gateway answers below 400. Chat asks for payment only when free-model capacity is available; any refusal after payment is free. Health data only goes to model providers that don't collect data; if none is available, the request is refused and not charged.
 

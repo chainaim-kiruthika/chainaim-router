@@ -8,7 +8,7 @@ import { attemptChat, type ModelAttempt } from "./dispatch.ts";
 import { HttpError } from "./errors.ts";
 import { REQUEST_FAULTS, shapeBody } from "./openrouter.ts";
 import type { Pool } from "./pool.ts";
-import { classify, countTypes, type Classes, type DataClass, type FoundClass } from "./privacy/classify.ts";
+import { classify, clientPlaceholderTypes, countTypes, type Classes, type DataClass, type FoundClass } from "./privacy/classify.ts";
 import { Masker, mapConversation, withinValue, type Message } from "./privacy/mask.ts";
 import { PresidioError, type PresidioClient } from "./privacy/presidio.ts";
 import { restoreCompletion } from "./privacy/restore.ts";
@@ -173,7 +173,8 @@ async function prepare(v: Validated, deps: ChatDeps, record: ChatRecord, signal?
   const found = await deps.presidio.analyzeAll(segments.map((s) => s.context + s.text), signal);
   const entities = found.map((f, i) => withinValue(segments[i].text, f, segments[i].context.length));
   const all = entities.flat();
-  const types = all.map((e) => e.type);
+  // Values a client masked before sending (<C_TYPE_n>, [CARD REMOVED]) count as what they replaced, so client masking never loosens the data policy.
+  const types = [...all.map((e) => e.type), ...clientPlaceholderTypes(segments.map((s) => s.text))];
   const local = classify(types);
   const masker = new Masker();
   let next = 0;

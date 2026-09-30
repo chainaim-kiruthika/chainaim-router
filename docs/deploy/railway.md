@@ -40,7 +40,7 @@ curl -si -X POST https://<domain>/v1/privacy/scan -H "content-type: application/
 cd services/paywall && npm install && node scripts/pay.ts --dry-run https://<domain>/v1/privacy/scan '{"text":"hi"}'
 ```
 
-The dry run prints the price (0.002 USDC), the asset, the network, your payTo and `tag=x402-global-challenge`. If the gateway can't start, its log names the missing Presidio entity, the entity types Presidio did not detect in its start-up test sentence, or the unreachable Presidio.
+The dry run prints the price (0.01 USDC unless `PRICE_SCAN` is set), the asset, the network, your payTo and `tag=x402-global-challenge`. If the gateway can't start, its log names the missing Presidio entity, the entity types Presidio did not detect in its start-up test sentence, or the unreachable Presidio.
 
 ## 4. Pay on TestNet
 

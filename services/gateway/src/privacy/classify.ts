@@ -31,6 +31,26 @@ export function classify(types: Iterable<string>, healthFlag = false): Classes {
   return { found, dataClass: found[0] ?? "none", policy: { dataCollection: phi ? "deny" : "allow", cardDataRemoved: card } };
 }
 
+/** <C_TYPE_n> in any case, as the client-side masker (services/paywall/scripts/client-mask.ts) writes it. The server's own <TYPE_n> does not match. */
+const CLIENT_PLACEHOLDER = /<\s*C_([A-Za-z][A-Za-z_]*?)_\d+\s*>/gi;
+/** What the client-side masker writes in place of a card number. */
+const CLIENT_CARD_REMOVED = "[CARD REMOVED]";
+
+/**
+ * Entity types a client already masked before sending: each <C_TYPE_n> counts
+ * as a TYPE found, and [CARD REMOVED] as a card. Added to what Presidio finds,
+ * so masking on the user's machine can only make the data policy stricter,
+ * never looser: a masked medical record number is still a medical ID.
+ */
+export function clientPlaceholderTypes(texts: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const text of texts) {
+    for (const m of text.matchAll(CLIENT_PLACEHOLDER)) out.push(m[1].toUpperCase());
+    if (text.includes(CLIENT_CARD_REMOVED)) out.push("CREDIT_CARD");
+  }
+  return out;
+}
+
 /** Occurrences per entity type, e.g. { PERSON: 2, HEALTH_TERM: 1 }. */
 export function countTypes(entities: readonly { type: string }[]): Record<string, number> {
   const counts: Record<string, number> = {};
