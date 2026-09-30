@@ -8,6 +8,8 @@ agent ──HTTPS──▶ paywall (public, x402) ──private network──▶
                    └──▶ GoPlausible facilitator                └──▶ Presidio analyzer (private)
 ```
 
+**Demo video:** [PrivacyBuddy by ChainAIm, about 1:45](https://drive.google.com/drive/folders/15Fsxdb3XhDuQvI8KrPXEhf7lrpXNk_Zw). A support agent masks a customer message in the browser, pays one cent per answer over x402, and gets the reply with the real details restored.
+
 Setup on your machine: `SETUP.md`. Design: `docs/superpowers/specs/2026-09-24-privacy-gateway-design.md`. Deployment: `docs/deploy/railway.md`. Decisions: `docs/adr/`.
 
 ## Paid endpoints (the paywall)
