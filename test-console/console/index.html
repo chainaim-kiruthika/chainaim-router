@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChainAim Test Console</title>
+<style>
+  :root { --bg: #f6f7f9; --card: #fff; --ink: #1d2330; --muted: #5d6677; --line: #dde1e8; --accent: #2f5bd3; --ok: #1b7f4b; --warn: #b3261e; --code: #f0f2f5; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #14171c; --card: #1c2027; --ink: #e6e8ec; --muted: #9aa3b2; --line: #2c323c; --accent: #7aa2ff; --ok: #5fd39a; --warn: #ff8a80; --code: #232833; } }
+  * { box-sizing: border-box; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
+  body { margin: 0; min-height: 100vh; min-height: 100dvh; background: var(--bg); color: var(--ink); font: clamp(0.875rem, 0.84rem + 0.2vw, 0.95rem)/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: clamp(1.2rem, 1.1rem + 0.6vw, 1.4rem); margin: 0 0 4px; }
+  h2 { font-size: clamp(1rem, 0.96rem + 0.25vw, 1.08rem); margin: 0 0 10px; }
+  p.note { color: var(--muted); margin: 0 0 18px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  textarea { width: 100%; min-height: 76px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); font: inherit; resize: vertical; }
+  button { margin: 8px 8px 0 0; padding: 7px 14px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent); color: #fff; font: inherit; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--accent); }
+  button:disabled { opacity: .5; cursor: wait; }
+  .out { margin-top: 12px; }
+  .label { font-size: clamp(0.7rem, 0.68rem + 0.1vw, 0.75rem); text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 12px 0 4px; }
+  pre, .box { background: var(--code); border-radius: 8px; padding: 10px; margin: 0; white-space: pre-wrap; word-break: break-word; font: clamp(0.78rem, 0.75rem + 0.15vw, 0.82rem)/1.5 ui-monospace, Consolas, monospace; }
+  .pill { display: inline-block; padding: 1px 9px; border-radius: 999px; border: 1px solid var(--line); margin-right: 6px; font-size: clamp(0.78rem, 0.75rem + 0.15vw, 0.82rem); }
+  .pill.phi { border-color: var(--warn); color: var(--warn); }
+  .pill.good { border-color: var(--ok); color: var(--ok); }
+  table { border-collapse: collapse; width: 100%; font-size: clamp(0.82rem, 0.8rem + 0.15vw, 0.88rem); }
+  td, th { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .ph { color: var(--accent); font-weight: 600; }
+  .err { color: var(--warn); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 720px) { .row { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>ChainAim test console</h1>
+  <p class="note">Everything runs on this PC: the real Presidio scanner in Docker, and the gateway and paywall built from <code>main</code>. The "model" is a stand-in that echoes what it received, so no real model is called and nothing leaves this computer. The paywall runs on TestNet, and no payment is made.</p>
+
+  <section>
+    <h2>1. Scan and mask</h2>
+    <textarea id="text">Patient Rahul Verma (MRN 4471902) emailed dr.emily.carter@clinic-example.org and called 415-555-0199 about his insulin. Card 4111 1111 1111 1111.</textarea>
+    <button id="scan">Scan ($0.002)</button><button id="mask">Mask ($0.003)</button>
+    <div class="out" id="pmOut"></div>
+  </section>
+
+  <section>
+    <h2>2. Private chat</h2>
+    <textarea id="msg">Please remind Rahul Verma (MRN 4471902) that his insulin refill is ready, and email him at rahul.verma@example.net.</textarea>
+    <button id="send">Send ($0.01)</button>
+    <div class="out" id="chatOut"></div>
+  </section>
+
+  <section>
+    <h2>3. Payment (paywall on TestNet)</h2>
+    <p class="note">Calls each paid route without paying. Expect 402 (payment required), with the price and the challenge tag.</p>
+    <button class="ghost" data-route="scan">Try scan</button><button class="ghost" data-route="mask">Try mask</button><button class="ghost" data-route="chat">Try chat</button>
+    <div class="out" id="payOut"></div>
+  </section>
+
+  <section>
+    <h2>4. Decision ledger</h2>
+    <p class="note">The gateway writes one line per request. It must hold no text, no placeholders and no map.</p>
+    <button class="ghost" id="ledger">Show the last entries</button>
+    <div class="out" id="ledgerOut"></div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); for (const k of kids) e.append(k); return e; };
+const label = (t) => el("div", { className: "label", textContent: t });
+const pre = (t) => el("pre", { textContent: typeof t === "string" ? t : JSON.stringify(t, null, 2) });
+const pill = (t, cls = "") => el("span", { className: "pill " + cls, textContent: t });
+const withPlaceholders = (text) => { const box = el("div", { className: "box" }); for (const part of String(text).split(/(<[A-Z_]+_\d+>|\[CARD REMOVED\])/)) box.append(/^(<[A-Z_]+_\d+>|\[CARD REMOVED\])$/.test(part) ? el("span", { className: "ph", textContent: part }) : part); return box; };
+async function call(url, body) {
+  const res = await fetch(url, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  return res.json();
+}
+async function busy(button, fn) { button.disabled = true; try { await fn(); } catch (e) { alert(e.message); } finally { button.disabled = false; } }
+const classPill = (dc) => pill("data class: " + dc, dc === "PHI" ? "phi" : dc === "none" ? "good" : "");
+
+$("scan").onclick = () => busy($("scan"), async () => {
+  const text = $("text").value;
+  const r = await call("/gateway/scan", { text });
+  const out = $("pmOut"); out.replaceChildren();
+  if (r.status !== 200) return out.append(el("p", { className: "err", textContent: `HTTP ${r.status}: ${r.body?.error?.message ?? ""}` }));
+  const b = r.body;
+  out.append(classPill(b.dataClass), pill("policy: data collection " + (b.policy?.dataCollection ?? "?")), label("Entities found"));
+  const t = el("table"); t.append(el("tr", {}, el("th", { textContent: "Type" }), el("th", { textContent: "Text" }), el("th", { textContent: "Score" })));
+  for (const e of b.entities ?? []) t.append(el("tr", {}, el("td", { textContent: e.type }), el("td", { textContent: text.slice(e.start, e.end) }), el("td", { textContent: e.score.toFixed(2) })));
+  out.append((b.entities ?? []).length ? t : el("p", { textContent: "none" }));
+});
+
+$("mask").onclick = () => busy($("mask"), async () => {
+  const r = await call("/gateway/mask", { text: $("text").value });
+  const out = $("pmOut"); out.replaceChildren();
+  if (r.status !== 200) return out.append(el("p", { className: "err", textContent: `HTTP ${r.status}: ${r.body?.error?.message ?? ""}` }));
+  const b = r.body;
+  out.append(classPill(b.dataClass), pill("cards removed: " + b.cardsRemoved), label("Masked text (what a model could see)"), withPlaceholders(b.maskedText), label("Map to restore it (only the caller gets this)"));
+  const t = el("table"); for (const [k, v] of Object.entries(b.map ?? {})) t.append(el("tr", {}, el("td", { className: "ph", textContent: k }), el("td", { textContent: v })));
+  out.append(Object.keys(b.map ?? {}).length ? t : el("p", { textContent: "empty" }));
+});
+
+$("send").onclick = () => busy($("send"), async () => {
+  const before = await call("/leaving");
+  const last = before.length ? before[before.length - 1].at : "";
+  const r = await call("/gateway/chat", { messages: [{ role: "user", content: $("msg").value }] });
+  await new Promise((ok) => setTimeout(ok, 400));
+  const after = (await call("/leaving")).filter((s) => s.at > last);
+  const out = $("chatOut"); out.replaceChildren();
+  if (r.status !== 200) out.append(el("p", { className: "err", textContent: `HTTP ${r.status}: ${r.body?.error?.message ?? ""}` }));
+  else {
+    const h = r.headers;
+    out.append(classPill(h["x-chainaim-data-class"]), pill("classifier: " + h["x-chainaim-classifier"]), pill("model: " + h["x-chainaim-model"]),
+      label("Answer you get back (placeholders restored; the stand-in model echoes)"), pre(r.body.choices?.[0]?.message?.content ?? ""));
+  }
+  const model = after.filter((s) => s.kind === "model");
+  const jev = after.filter((s) => s.kind === "jev");
+  const cols = el("div", { className: "row" });
+  const m = el("div", {}, label("What left ChainAim to the model"));
+  for (const s of model) { m.append(pill("data_collection: " + (s.body.provider?.data_collection ?? "?"), s.body.provider?.data_collection === "deny" ? "phi" : "")); for (const msg of s.body.messages ?? []) m.append(withPlaceholders(`[${msg.role}] ${typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content ?? msg.tool_calls)}`)); }
+  if (!model.length) m.append(el("p", { textContent: "nothing (no model was called)" }));
+  const j = el("div", {}, label("What Jev received"));
+  if (jev.length) for (const s of jev) j.append(withPlaceholders(s.body.request)); else j.append(el("p", { textContent: "nothing (Jev is never called for health data)" }));
+  cols.append(m, j); out.append(cols);
+});
+
+for (const b of document.querySelectorAll("[data-route]")) b.onclick = () => busy(b, async () => {
+  const r = await call("/paywall/" + b.dataset.route);
+  const out = $("payOut"); out.replaceChildren();
+  out.append(pill(`${b.dataset.route}: HTTP ${r.status}${r.status === 402 ? " payment required" : ""}`, r.status === 402 ? "good" : "phi"));
+  for (const a of r.accepts) out.append(pre(`price     ${a.price} USDC\nnetwork   ${a.network}\nasset     ${a.asset} (USDC)\npay to    ${a.payTo}\ntag       ${a.tag}\nbazaar    ${r.bazaar ? "listed" : "no"}`));
+  if (r.body) out.append(pre(r.body));
+});
+
+$("ledger").onclick = () => busy($("ledger"), async () => {
+  const r = await call("/ledger");
+  $("ledgerOut").replaceChildren(...r.lines.map((l) => pre(l)));
+});
+</script>
+</body>
+</html>

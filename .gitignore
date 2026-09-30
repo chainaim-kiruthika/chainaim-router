@@ -11,3 +11,6 @@ models/
 # build/deps
 node_modules/
 packages/route-engine/node_modules/
+
+# local test console: its gateway key stays on this PC
+test-console/local-gateway-key.txt
