@@ -18,6 +18,7 @@
 - Card numbers are removed, never restored.
 - The decision ledger records classes and counts, never text.
 - The paywall strips payment headers, so the gateway never learns who paid.
+- On the user's own computer first: the `private-ask` command masks identity numbers, card numbers and labelled names before anything is sent, and puts them back in the answer locally. The gateway scans again as a second check and keeps masked health data on no-collection providers. Names without a label and medical details still reach the gateway.
 
 **Why x402 is core.** Every call is a paid request with no accounts and no API keys: an agent discovers the service in the Bazaar and pays per call. Settlement happens only after a successful answer, so refusals are free.
 
