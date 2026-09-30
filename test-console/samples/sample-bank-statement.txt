@@ -1,0 +1,31 @@
+SAMPLE BANK STATEMENT (SYNTHETIC: every name, number and address below is made up)
+
+Northwind Example Bank. Statement period: 01 Sep 2026 to 30 Sep 2026.
+
+Account holder: Priya Raman.
+
+Email: priya.raman@example.com
+
+Phone: +91 98765 43210
+
+PAN: AJZPR4821K
+
+Linked USD account IBAN: GB82 WEST 1234 5698 7654 32
+
+Debit card on file: 4111 1111 1111 1111, expires 08/28.
+
+Opening balance: INR 84,250.00
+
+Transactions:
+- 02 Sep | Salary credit from Acme Logistics | +95,000.00
+- 04 Sep | Rent paid to Suresh Kumar by UPI | -28,000.00
+- 09 Sep | Electricity bill | -2,340.00
+- 12 Sep | Transfer to Ms. Ananya Raman | -15,000.00
+- 17 Sep | Cheque return charge | -500.00
+- 21 Sep | Online purchase at TechMart, card ending 1111 | -12,499.00
+- 26 Sep | ATM withdrawal, T Nagar branch | -5,000.00
+- 29 Sep | Home loan instalment | -31,450.00
+
+Closing balance: INR 84,461.00
+
+Questions about this statement: contact your relationship manager, Karthik Subramanian, at karthik.s@northwind-example.com or +91 44 5550 0123.
