@@ -23,6 +23,20 @@ Each price is set on the paywall by `PRICE_SCAN`, `PRICE_MASK` and `PRICE_CHAT` 
 
 Every refusal (4xx, 5xx) is free: the payment settles only when the gateway answers below 400. Chat asks for payment only when free-model capacity is available; any refusal after payment is free. Health data only goes to model providers that don't collect data; if none is available, the request is refused and not charged.
 
+## Mask on your own computer first (`private-ask`)
+
+`services/paywall/scripts/private-ask.ts` reads a text file and masks it **on your computer** before anything is sent: names after a label (`Patient:`, `Name:` at the start of a line, `Dr.`, `Mr./Mrs.`), Aadhaar, PAN, IFSC, card numbers (Luhn check), Indian mobile numbers, email addresses, and bank account and medical record numbers next to a label. It shows exactly what will leave, then pays over x402 and sends only the masked text. Placeholders look like `<C_PERSON_1>`; card numbers become `[CARD REMOVED]` and are never restored. Placeholders in the answer are put back on your computer, and the map never leaves it.
+
+The gateway still scans the masked text with Presidio as a second check, and counts each `<C_TYPE_n>` as the value it replaced, so a masked prescription keeps the no-collection policy for health data.
+
+```bash
+cd services/paywall
+node scripts/private-ask.ts --file prescription.txt --endpoint scan --dry-run
+AVM_MNEMONIC="<buyer's 25 words>" node scripts/private-ask.ts --file prescription.txt --url https://PAYWALL --endpoint chat
+```
+
+Flags: `--endpoint chat|scan|mask` (default chat), `--question`, `--max-tokens` (1 to 1024), `--dry-run` (sends and pays nothing), `--keep-masked`, `--no-names`. Limits: `.txt` and `.md` files only; the checks are patterns, not a language model, so a name without a label can be missed on the computer and is left to the gateway's scan. Diagnoses, drugs, ages, dates and places are not masked, because the model needs them or they are not detected.
+
 ## Gateway routes (private, behind the gateway key)
 
 The paid routes above, plus `POST /v1/route/explain` (the chat decision without a model call), `GET /internal/capacity` (the paywall's chat guard), `GET /v1/deployments`, and `GET /healthz` (no key: 200 when Presidio answered its last check). Chat responses carry `x-chainaim-decision-id`, `x-chainaim-data-class`, `x-chainaim-classifier`, `x-chainaim-model` and `x-chainaim-attempts`.
