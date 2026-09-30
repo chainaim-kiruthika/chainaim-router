@@ -107,7 +107,15 @@ async function call(url, body) {
   const res = await fetch(url, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   return res.json();
 }
-async function busy(button, fn) { button.disabled = true; try { await fn(); } catch (e) { alert(e.message); } finally { button.disabled = false; } }
+const SERVER = "http://127.0.0.1:8730";
+async function busy(button, fn) {
+  button.disabled = true;
+  try { await fn(); }
+  catch (e) { alert(/failed to fetch|failed to parse url|networkerror/i.test(e.message) ? `Can't reach the test console server. Open ${SERVER} in your browser, and check that the "ChainAim test console" window is still open (start.cmd).` : e.message); }
+  finally { button.disabled = false; }
+}
+// Opened straight from disk (or from an editor preview), the buttons have no server to talk to.
+if (location.protocol !== "http:") document.body.prepend(el("p", { className: "err", style: "margin:0;padding:10px 16px;border-bottom:1px solid var(--line)" }, "This page was opened from a file, so its buttons can't reach the server. Open ", el("a", { href: SERVER, textContent: SERVER }), " instead (start.cmd must be running)."));
 const classPill = (dc) => pill("data class: " + dc, dc === "PHI" ? "phi" : dc === "none" ? "good" : "");
 
 // Colour by kind of data: blue people, amber contact details, red health, magenta cards, purple IDs.
@@ -295,6 +303,8 @@ $("send").onclick = () => busy($("send"), async () => {
   if (r.status !== 200) out.append(el("p", { className: "err", textContent: `HTTP ${r.status}: ${r.body?.error?.message ?? ""}` }));
   else {
     const h = r.headers;
+    // The stand-in's model ids start with "stub/": it only echoes the text, so say so instead of looking like a broken answer.
+    if ((h["x-chainaim-model"] ?? "").startsWith("stub/")) out.append(el("p", { className: "err", textContent: "Stand-in mode: this fake model only echoes your text back. For real answers, run use-real-models.cmd in the test-console folder and paste your OpenRouter key when it asks." }));
     out.append(classPill(h["x-chainaim-data-class"]), pill("classifier: " + h["x-chainaim-classifier"]), pill("model: " + h["x-chainaim-model"]),
       el("div", { className: "chat" },
         bubble("you", "You", el("div", { textContent: $("msg").value })),
