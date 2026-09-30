@@ -20,9 +20,9 @@ export type AttemptResult = { attempt: ModelAttempt; completion?: Record<string,
  */
 function healthEffect(outcome: Outcome, status: number | undefined): HealthEffect {
   if (outcome === "ok") return "ok";
-  if (outcome === "rate_limited_provider") return "cooldown";
+  if (outcome === "rate_limited_provider" || outcome === "model_restricted") return "cooldown"; // a gated model refuses every caller, so skip it for a while
   if (outcome === "upstream_error") {
-    // categorize sends 401 and every 403 without moderation metadata to key_rejected, so a 403 here is a moderation refusal: about the request, not the model.
+    // categorize sends 401 and every 403 without moderation or routing metadata to key_rejected, so a 403 here is a moderation refusal: about the request, not the model.
     return status !== undefined && (REQUEST_FAULTS.has(status) || status === 403) ? "neutral" : "cooldown";
   }
   if (outcome === "timeout" || outcome === "network_error") return "fail";

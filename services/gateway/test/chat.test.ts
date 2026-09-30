@@ -326,6 +326,17 @@ describe("limits and failures", () => {
     assert.equal(gw.pool.isCoolingDown("stub/bravo-27b:free"), true);
   });
 
+  it("a gated model (403 after routing ran) moves on to the next model, cools down, and does not make chat unavailable", async () => {
+    const gw = await start();
+    or.chatModes["stub/bravo-27b:free"] = "restricted403";
+    const r = await chat(gw, user("hi"));
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get("x-chainaim-model"), "stub/alpha-70b:free");
+    assert.equal(r.headers.get("x-chainaim-attempts"), "2");
+    assert.equal(gw.pool.isCoolingDown("stub/bravo-27b:free"), true);
+    assert.equal((await capacity(gw)).chatAvailable, true);
+  });
+
   it("a timeout moves on to the next model", async () => {
     const gw = await start({ attemptTimeoutMs: 300 });
     or.chatModes["stub/bravo-27b:free"] = "slow";
