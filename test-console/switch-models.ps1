@@ -28,6 +28,9 @@ if ($To -eq "real") {
   }
   if (-not $env:OPENROUTER_API_KEY) { throw "No key entered, so nothing changed." }
   $envArgs += @("-e", "OPENROUTER_API_KEY")
+  # Free models are often rate-limited or slow, and some are gated. For this local demo, let a failing model sit out for
+  # 5 minutes and let one request try up to 5 models, so it reaches one that works. The production image keeps its defaults.
+  $flags += @("--cooldown-ms", "300000", "--max-attempts", "5")
 } else {
   $env:OR_DUMMY = "sk-or-dummy"
   $envArgs += @("-e", "OR_DUMMY")
