@@ -52,7 +52,7 @@ describe("paywall (TestNet)", () => {
   const priceOf = async (path: string): Promise<PaymentRequired> => decode((await post(path, { text: "Jane Roe" })).headers.get("payment-required"));
 
   it("asks for payment with the price, network, payTo, tag and Bazaar metadata", async () => {
-    for (const [path, amount] of [["/v1/privacy/scan", "2000"], ["/v1/privacy/mask", "3000"], ["/v1/chat/completions", "10000"]]) {
+    for (const [path, amount] of [["/v1/privacy/scan", "10000"], ["/v1/privacy/mask", "10000"], ["/v1/chat/completions", "10000"]]) {
       const r = await post(path, { text: "Jane Roe" });
       assert.equal(r.status, 402, path);
       const required = decode(r.headers.get("payment-required"));
@@ -103,7 +103,7 @@ describe("paywall (TestNet)", () => {
     const line = JSON.parse(logs[0]);
     assert.deepEqual(
       [line.event, line.route, line.amount, line.asset, line.payer, line.transaction],
-      ["payment_settled", "POST /v1/privacy/mask", "3000", "10458941", "BUYERADDRESS", "TX-STUB-1"],
+      ["payment_settled", "POST /v1/privacy/mask", "10000", "10458941", "BUYERADDRESS", "TX-STUB-1"],
     );
     assert.ok(!logs[0].includes("Jane"), "no request text in the payment log");
     assert.equal("decisionId" in line, false, "no decision id in the payment log");
@@ -187,7 +187,7 @@ describe("paywall (MainNet)", () => {
   it("prices in MainNet USDC (ASA 31566704)", async () => {
     const r = await fetch(`${paywall.url}/v1/privacy/scan`, { method: "POST", headers: { "content-type": "application/json" }, body: '{"text":"hi"}' });
     const a = decode(r.headers.get("payment-required")).accepts[0];
-    assert.deepEqual([a.network, a.asset, a.amount], [NETWORKS.mainnet, "31566704", "2000"]);
+    assert.deepEqual([a.network, a.asset, a.amount], [NETWORKS.mainnet, "31566704", "10000"]);
   });
 });
 
