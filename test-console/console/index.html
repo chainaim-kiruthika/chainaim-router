@@ -30,6 +30,9 @@
   th { color: var(--muted); font-weight: 600; }
   .ph { color: var(--accent); font-weight: 600; }
   .err { color: var(--warn); }
+  .muted { color: var(--muted); }
+  .pick { margin-top: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+  .pick input[type=file] { font: inherit; color: var(--muted); max-width: 100%; }
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   @media (max-width: 720px) { .row { grid-template-columns: 1fr; } }
 </style>
@@ -37,11 +40,12 @@
 <body>
 <main>
   <h1>ChainAim test console</h1>
-  <p class="note">Everything runs on this PC: the real Presidio scanner in Docker, and the gateway and paywall built from <code>main</code>. The "model" is a stand-in that echoes what it received, so no real model is called and nothing leaves this computer. The paywall runs on TestNet, and no payment is made.</p>
+  <p class="note">Everything runs on this PC: the real Presidio scanner in Docker, and the gateway and paywall built from <code>main</code>. By default the "model" is a stand-in that echoes what it received, so no real model is called and nothing leaves this computer. After <code>use-real-models.cmd</code>, chat goes to OpenRouter's free models, and they receive only the masked text. The paywall runs on TestNet, and no payment is made.</p>
 
   <section>
     <h2>1. Scan and mask</h2>
     <textarea id="text">Patient Rahul Verma (MRN 4471902) emailed dr.emily.carter@clinic-example.org and called 415-555-0199 about his insulin. Card 4111 1111 1111 1111.</textarea>
+    <div class="pick"><label>Attach a text file <input type="file" id="file1" accept=".txt,.md,.csv,.tsv,.json,.log,.xml,.html,.yml,.yaml,text/*"></label><span class="muted" id="file1Info"></span></div>
     <button id="scan">Scan ($0.002)</button><button id="mask">Mask ($0.003)</button>
     <div class="out" id="pmOut"></div>
   </section>
@@ -49,7 +53,8 @@
   <section>
     <h2>2. Private chat</h2>
     <textarea id="msg">Please remind Rahul Verma (MRN 4471902) that his insulin refill is ready, and email him at rahul.verma@example.net.</textarea>
-    <button id="send">Send ($0.01)</button>
+    <div class="pick"><label>Attach a text file <input type="file" id="file2" accept=".txt,.md,.csv,.tsv,.json,.log,.xml,.html,.yml,.yaml,text/*"></label><span class="muted" id="file2Info"></span></div>
+    <button id="send">Send ($0.01)</button><button class="ghost" id="tryMedia">Try an image or PDF (refused)</button><input type="file" id="media" accept="image/*,.pdf,application/pdf" hidden>
     <div class="out" id="chatOut"></div>
   </section>
 
@@ -80,6 +85,43 @@ async function call(url, body) {
 }
 async function busy(button, fn) { button.disabled = true; try { await fn(); } catch (e) { alert(e.message); } finally { button.disabled = false; } }
 const classPill = (dc) => pill("data class: " + dc, dc === "PHI" ? "phi" : dc === "none" ? "good" : "");
+
+// Text files are read in the browser and put in the box; nothing is sent until a button is clicked.
+// The gateway takes text only, so images and PDFs are not loaded here (the button in section 2 shows it refusing them).
+const TEXT_FILE = /\.(txt|md|csv|tsv|json|log|xml|html?|ya?ml)$/i;
+function attach(inputId, areaId, infoId, limit, below) {
+  $(inputId).onchange = async (ev) => {
+    const file = ev.target.files[0]; ev.target.value = "";
+    const info = $(infoId);
+    if (!file) return;
+    const refuse = (why) => { info.className = "err"; info.textContent = `${file.name}: ${why}`; };
+    if (!file.type.startsWith("text/") && !TEXT_FILE.test(file.name)) return refuse("only text files can be loaded. The gateway refuses images and PDFs.");
+    const text = await file.text();
+    if (text.includes("\u0000")) return refuse("this looks like a binary file, not text.");
+    const area = $(areaId);
+    area.value = below ? area.value.replace(/\s+$/, "") + "\n\n" + text : text;
+    const over = text.length > limit;
+    info.className = over ? "err" : "muted";
+    info.textContent = `${file.name}: ${text.length.toLocaleString()} characters ${below ? "added below your question" : "loaded"}. ` +
+      (over ? `Over the limit of ${limit.toLocaleString()}, so the gateway will refuse it.` : "Nothing is sent until you click a button.");
+  };
+}
+attach("file1", "text", "file1Info", 20000, false);
+attach("file2", "msg", "file2Info", 48000, true);
+
+$("tryMedia").onclick = () => $("media").click();
+$("media").onchange = (ev) => {
+  const file = ev.target.files[0]; ev.target.value = "";
+  if (!file) return;
+  busy($("tryMedia"), async () => {
+    if (file.size > 2_000_000) return alert("Pick a file under 2 MB.");
+    const url = await new Promise((ok, no) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = no; fr.readAsDataURL(file); });
+    const part = file.type.startsWith("image/") ? { type: "image_url", image_url: { url } } : { type: "file", file: { filename: file.name, file_data: url } };
+    const r = await call("/gateway/chat", { messages: [{ role: "user", content: [{ type: "text", text: $("msg").value }, part] }] });
+    $("chatOut").replaceChildren(pill(`${file.name}: HTTP ${r.status}`, r.status === 400 ? "good" : "phi"), label("What the gateway said"),
+      pre(r.body?.error?.message ?? (r.status === 200 ? "It was accepted." : JSON.stringify(r.body))));
+  });
+};
 
 $("scan").onclick = () => busy($("scan"), async () => {
   const text = $("text").value;
@@ -114,16 +156,18 @@ $("send").onclick = () => busy($("send"), async () => {
   else {
     const h = r.headers;
     out.append(classPill(h["x-chainaim-data-class"]), pill("classifier: " + h["x-chainaim-classifier"]), pill("model: " + h["x-chainaim-model"]),
-      label("Answer you get back (placeholders restored; the stand-in model echoes)"), pre(r.body.choices?.[0]?.message?.content ?? ""));
+      label("Answer you get back (placeholders restored)"), pre(r.body.choices?.[0]?.message?.content ?? ""));
   }
   const model = after.filter((s) => s.kind === "model");
   const jev = after.filter((s) => s.kind === "jev");
+  // An answered chat that the stand-in never saw means the real models are on: these two panels only record the stand-in.
+  const realMode = r.status === 200 && !model.length;
   const cols = el("div", { className: "row" });
   const m = el("div", {}, label("What left ChainAim to the model"));
   for (const s of model) { m.append(pill("data_collection: " + (s.body.provider?.data_collection ?? "?"), s.body.provider?.data_collection === "deny" ? "phi" : "")); for (const msg of s.body.messages ?? []) m.append(withPlaceholders(`[${msg.role}] ${typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content ?? msg.tool_calls)}`)); }
-  if (!model.length) m.append(el("p", { textContent: "nothing (no model was called)" }));
+  if (!model.length) m.append(el("p", { textContent: realMode ? "not shown: real models are on, and this panel only records the stand-in. The model received the masked text only." : "nothing (no model was called)" }));
   const j = el("div", {}, label("What Jev received"));
-  if (jev.length) for (const s of jev) j.append(withPlaceholders(s.body.request)); else j.append(el("p", { textContent: "nothing (Jev is never called for health data)" }));
+  if (jev.length) for (const s of jev) j.append(withPlaceholders(s.body.request)); else j.append(el("p", { textContent: realMode ? "not shown: real models are on, and this panel only records the stand-in." : "nothing (Jev is never called for health data)" }));
   cols.append(m, j); out.append(cols);
 });
 
