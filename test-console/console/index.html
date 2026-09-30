@@ -69,7 +69,7 @@
   <section>
     <h2>1. Scan and mask</h2>
     <textarea id="text">Patient Rahul Verma (MRN 4471902) emailed dr.emily.carter@clinic-example.org and called 415-555-0199 about his insulin. Card 4111 1111 1111 1111.</textarea>
-    <div class="pick"><label>Attach a text file <input type="file" id="file1" accept=".txt,.md,.csv,.tsv,.json,.log,.xml,.html,.yml,.yaml,text/*"></label><span class="muted" id="file1Info"></span></div>
+    <div class="pick"><label>Attach a text file <input type="file" id="file1" accept=".txt,.md,.csv,.tsv,.json,.log,.xml,.html,.yml,.yaml,.pdf,text/*,application/pdf"></label><span class="muted" id="file1Info"></span></div>
     <button id="scan">Scan ($0.002)</button><button id="mask">Mask ($0.003)</button>
     <div class="out" id="pmOut"></div>
   </section>
@@ -77,7 +77,7 @@
   <section>
     <h2>2. Private chat</h2>
     <textarea id="msg">Please remind Rahul Verma (MRN 4471902) that his insulin refill is ready, and email him at rahul.verma@example.net.</textarea>
-    <div class="pick"><label>Attach a text file <input type="file" id="file2" accept=".txt,.md,.csv,.tsv,.json,.log,.xml,.html,.yml,.yaml,text/*"></label><span class="muted" id="file2Info"></span></div>
+    <div class="pick"><label>Attach a text file <input type="file" id="file2" accept=".txt,.md,.csv,.tsv,.json,.log,.xml,.html,.yml,.yaml,.pdf,text/*,application/pdf"></label><span class="muted" id="file2Info"></span></div>
     <button id="send">Send ($0.01)</button><button class="ghost" id="tryMedia">Try an image or PDF (refused)</button><input type="file" id="media" accept="image/*,.pdf,application/pdf" hidden>
     <div class="out" id="chatOut"></div>
   </section>
@@ -165,23 +165,64 @@ function markdown(src) {
 }
 const bubble = (who, name, body) => el("div", { className: "bubble " + who }, el("div", { className: "who", textContent: name }), body);
 
-// Text files are read in the browser and put in the box; nothing is sent until a button is clicked.
-// The gateway takes text only, so images and PDFs are not loaded here (the button in section 2 shows it refusing them).
+// Files are read in the browser and their text is put in the box; nothing is sent until a button is clicked.
+// The gateway takes text only. A PDF's text is extracted here (pdf.js, loaded from cdnjs the first time you pick a PDF);
+// the gateway never receives the PDF itself, and the button in section 2 shows it refusing one.
 const TEXT_FILE = /\.(txt|md|csv|tsv|json|log|xml|html?|ya?ml)$/i;
+const PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
+let pdfjsReady;
+function loadPdfjs() {
+  pdfjsReady ??= new Promise((ok, no) => {
+    const s = el("script", { src: PDFJS + "pdf.min.js" });
+    s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + "pdf.worker.min.js"; ok(window.pdfjsLib); };
+    s.onerror = () => { pdfjsReady = undefined; no(new Error("could not load the PDF reader (it needs an internet connection the first time).")); };
+    document.head.append(s);
+  });
+  return pdfjsReady;
+}
+async function pdfText(file) {
+  const lib = await loadPdfjs();
+  const pdf = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const pages = [];
+  for (let n = 1; n <= pdf.numPages; n++) {
+    const items = (await (await pdf.getPage(n)).getTextContent()).items.filter((i) => typeof i.str === "string" && i.str !== "");
+    const rows = new Map(); // one row per baseline, read left to right, top to bottom
+    for (const it of items) { const y = Math.round(it.transform[5]); if (!rows.has(y)) rows.set(y, []); rows.get(y).push(it); }
+    const ys = [...rows.keys()].sort((a, b) => b - a);
+    const gaps = ys.slice(1).map((y, i) => ys[i] - y);
+    const line = Math.min(...gaps, Infinity);
+    const out = [];
+    ys.forEach((y, i) => {
+      if (i && Number.isFinite(line) && ys[i - 1] - y > line * 1.6) out.push(""); // a blank line where the page had one
+      out.push(rows.get(y).sort((a, b) => a.transform[4] - b.transform[4]).map((t) => t.str).join(" ").trim());
+    });
+    pages.push(out.join("\n"));
+  }
+  return { text: pages.join("\n\n"), pages: pdf.numPages };
+}
 function attach(inputId, areaId, infoId, limit, below) {
   $(inputId).onchange = async (ev) => {
     const file = ev.target.files[0]; ev.target.value = "";
     const info = $(infoId);
     if (!file) return;
     const refuse = (why) => { info.className = "err"; info.textContent = `${file.name}: ${why}`; };
-    if (!file.type.startsWith("text/") && !TEXT_FILE.test(file.name)) return refuse("only text files can be loaded. The gateway refuses images and PDFs.");
-    const text = await file.text();
-    if (text.includes("\u0000")) return refuse("this looks like a binary file, not text.");
+    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+    if (!isPdf && !file.type.startsWith("text/") && !TEXT_FILE.test(file.name)) return refuse("only text files and PDFs can be loaded. The gateway refuses images.");
+    let text, from = "";
+    if (isPdf) {
+      info.className = "muted"; info.textContent = `${file.name}: reading the PDF in your browser…`;
+      try { const r = await pdfText(file); text = r.text; from = `, extracted from ${r.pages} page${r.pages === 1 ? "" : "s"} in your browser`; }
+      catch (e) { return refuse(e.message || "could not read this PDF."); }
+      if (!text.trim()) return refuse("no text found. It may be a scan (an image), which the gateway cannot read.");
+    } else {
+      text = await file.text();
+      if (text.includes("\u0000")) return refuse("this looks like a binary file, not text.");
+    }
     const area = $(areaId);
     area.value = below ? area.value.replace(/\s+$/, "") + "\n\n" + text : text;
     const over = text.length > limit;
     info.className = over ? "err" : "muted";
-    info.textContent = `${file.name}: ${text.length.toLocaleString()} characters ${below ? "added below your question" : "loaded"}. ` +
+    info.textContent = `${file.name}: ${text.length.toLocaleString()} characters ${below ? "added below your question" : "loaded"}${from}. ` +
       (over ? `Over the limit of ${limit.toLocaleString()}, so the gateway will refuse it.` : "Nothing is sent until you click a button.");
   };
 }

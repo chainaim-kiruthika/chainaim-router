@@ -1,0 +1,138 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Count 1 /Kids [6 0 R] >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+5 0 obj
+<< /Length 1629 >>
+stream
+BT
+50 790 Td
+14 TL
+/F2 11 Tf
+(SAMPLE BANK STATEMENT \(SYNTHETIC: every name, number and address below is made up\)) Tj
+T*
+/F1 10 Tf
+() Tj
+T*
+/F1 10 Tf
+(Northwind Example Bank. Statement period: 01 Sep 2026 to 30 Sep 2026.) Tj
+T*
+/F1 10 Tf
+() Tj
+T*
+/F1 10 Tf
+(Account holder: Priya Raman.) Tj
+T*
+/F1 10 Tf
+() Tj
+T*
+/F1 10 Tf
+(Email: priya.raman@example.com) Tj
+T*
+/F1 10 Tf
+() Tj
+T*
+/F1 10 Tf
+(Phone: +91 98765 43210) Tj
+T*
+/F1 10 Tf
+() Tj
+T*
+/F1 10 Tf
+(PAN: AJZPR4821K) Tj
+T*
+/F1 10 Tf
+() Tj
+T*
+/F1 10 Tf
+(Linked USD account IBAN: GB82 WEST 1234 5698 7654 32) Tj
+T*
+/F1 10 Tf
+() Tj
+T*
+/F1 10 Tf
+(Debit card on file: 4111 1111 1111 1111, expires 08/28.) Tj
+T*
+/F1 10 Tf
+() Tj
+T*
+/F1 10 Tf
+(Opening balance: INR 84,250.00) Tj
+T*
+/F1 10 Tf
+() Tj
+T*
+/F1 10 Tf
+(Transactions:) Tj
+T*
+/F1 10 Tf
+(- 02 Sep | Salary credit from Acme Logistics | +95,000.00) Tj
+T*
+/F1 10 Tf
+(- 04 Sep | Rent paid to Suresh Kumar by UPI | -28,000.00) Tj
+T*
+/F1 10 Tf
+(- 09 Sep | Electricity bill | -2,340.00) Tj
+T*
+/F1 10 Tf
+(- 12 Sep | Transfer to Ms. Ananya Raman | -15,000.00) Tj
+T*
+/F1 10 Tf
+(- 17 Sep | Cheque return charge | -500.00) Tj
+T*
+/F1 10 Tf
+(- 21 Sep | Online purchase at TechMart, card ending 1111 | -12,499.00) Tj
+T*
+/F1 10 Tf
+(- 26 Sep | ATM withdrawal, T Nagar branch | -5,000.00) Tj
+T*
+/F1 10 Tf
+(- 29 Sep | Home loan instalment | -31,450.00) Tj
+T*
+/F1 10 Tf
+() Tj
+T*
+/F1 10 Tf
+(Closing balance: INR 84,461.00) Tj
+T*
+/F1 10 Tf
+() Tj
+T*
+/F1 10 Tf
+(Questions about this statement: contact your relationship manager, Karthik Subramanian,) Tj
+T*
+/F1 10 Tf
+(at karthik.s@northwind-example.com or +91 44 5550 0123.) Tj
+T*
+/F1 10 Tf
+() Tj
+T*
+ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 5 0 R >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000185 00000 n 
+0000000260 00000 n 
+0000001941 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+2077
+%%EOF
