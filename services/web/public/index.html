@@ -344,7 +344,7 @@ function showBusy(text) { $("status").replaceChildren(el("div", { className: "bu
 function showError(message, status, transaction) {
   const box = el("div", { className: "error", role: "alert" }, message);
   if (transaction) box.append(" ", el("a", { href: `${loraBase()}/transaction/${transaction}`, target: "_blank", rel: "noopener", textContent: "See the payment receipt ↗" }));
-  if (status === 402 || /USDC/.test(message)) box.append(" ", el("a", { href: "https://faucet.circle.com", target: "_blank", rel: "noopener", textContent: "Get TestNet USDC" }));
+  if (wallets?.network === "testnet" && (status === 402 || /USDC/.test(message))) box.append(" ", el("a", { href: "https://faucet.circle.com", target: "_blank", rel: "noopener", textContent: "Get TestNet USDC" }));
   if (/Lute could not open/.test(message)) box.append(" ", el("a", { href: "https://lute.app", target: "_blank", rel: "noopener", textContent: "Get Lute" }));
   $("status").replaceChildren(box);
 }
@@ -386,7 +386,7 @@ async function doExecute() {
     }
     const price = wallets?.prices?.chat;
     if (buyer.optedIn === false) { showError(`This wallet has not opted in to USDC (asset ${wallets.asset}) yet. Opt in from Lute first. Nothing was sent.`, 402); return; }
-    if (price && buyer.usdc !== null && buyer.usdc < price) { showError(`Your wallet has ${buyer.usdc} USDC and this answer costs ${price}. Fund it with TestNet USDC and try again. Nothing was sent.`, 402); return; }
+    if (price && buyer.usdc !== null && buyer.usdc < price) { showError(`Your wallet has ${buyer.usdc} USDC and this answer costs ${price}. Fund it with ${wallets?.network === "mainnet" ? "USDC on MainNet" : wallets?.network === "testnet" ? "TestNet USDC" : "USDC"} and try again. Nothing was sent.`, 402); return; }
     showBusy("Approve the payment in Lute…");
     const a = await payAndAsk(buyer.address, net(), current.masked, undefined, () => showBusy("Payment approved, waiting for the answer…"));
     if (a.error) { showError(a.error, a.status, a.transaction); return; }

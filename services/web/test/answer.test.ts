@@ -3,6 +3,9 @@ import { describe, it } from "node:test";
 import { readAnswer } from "../src/answer.ts";
 
 const headers = (h: Record<string, string>) => (name: string) => h[name] ?? null;
+const b64 = (v: unknown) => Buffer.from(JSON.stringify(v)).toString("base64");
+/** The Payment-Required header of a 402, as the paywall sends it: base64 JSON with the reason in `error`. */
+const requiredHeader = (error: string) => headers({ "payment-required": b64({ x402Version: 2, error, accepts: [] }) });
 const answerText = JSON.stringify({ choices: [{ message: { content: "Hi <C_PERSON_1>" } }] });
 
 describe("readAnswer", () => {
@@ -20,11 +23,36 @@ describe("readAnswer", () => {
     assert.deepEqual("payment" in a && a.payment, { transaction: null, network: null });
   });
 
-  it("explains a payment that was not accepted", () => {
+  it("explains a payment that was not accepted, without naming a network it does not know", () => {
     assert.deepEqual(readAnswer(402, "{}", headers({}), undefined), {
-      error: "The payment was not accepted. Check that your wallet holds TestNet USDC and has opted in to it. You were not charged.",
+      error: "The payment was not accepted. Check that your wallet holds USDC and has opted in to it. You were not charged.",
       status: 402,
     });
+  });
+
+  it("names the network the payment was for", () => {
+    assert.match((readAnswer(402, "{}", headers({}), undefined, "mainnet") as { error: string }).error, /holds USDC on MainNet and has opted in/);
+    assert.match((readAnswer(402, "{}", headers({}), undefined, "testnet") as { error: string }).error, /holds USDC on TestNet and has opted in/);
+  });
+
+  it("gives the paywall's own reason for refusing the payment", () => {
+    assert.deepEqual(readAnswer(402, "{}", requiredHeader("this payment was already presented; sign a new one"), undefined, "mainnet"), {
+      error: "The payment was not accepted (this payment was already presented; sign a new one). Check that your wallet holds USDC on MainNet and has opted in to it. You were not charged.",
+      status: 402,
+    });
+  });
+
+  it("cuts a long reason, strips control characters, and ignores one that is not text", () => {
+    const long = readAnswer(402, "{}", requiredHeader("x".repeat(400)), undefined) as { error: string };
+    assert.ok(long.error.startsWith(`The payment was not accepted (${"x".repeat(120)}).`));
+    assert.doesNotMatch((readAnswer(402, "{}", requiredHeader("bad\nreason\u0000"), undefined) as { error: string }).error, /[\u0000-\u001f]/);
+    assert.match((readAnswer(402, "{}", headers({ "payment-required": b64({ error: { nested: true } }) }), undefined) as { error: string }).error, /^The payment was not accepted\. Check/);
+  });
+
+  it("leaves the reason out when the paywall only asked for payment or the header cannot be read", () => {
+    for (const h of [requiredHeader("Payment required"), requiredHeader(""), headers({ "payment-required": "not base64 json" })]) {
+      assert.match((readAnswer(402, "{}", h, undefined) as { error: string }).error, /^The payment was not accepted\. Check/);
+    }
   });
 
   it("passes the service's own message on, cut to 300 characters", () => {

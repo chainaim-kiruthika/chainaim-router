@@ -109,4 +109,12 @@ describe("payWith", () => {
     const a = await ask(deps({ fetch: route.fetcher }));
     assert.match((a as { error: string }).error, /You were not charged/);
   });
+
+  it("shows the paywall's reason and the network when it refuses the payment", async () => {
+    const refusal = () => new Response("{}", { status: 402, headers: { "payment-required": b64({ x402Version: 2, error: "invalid payment group", accepts: [] }) } });
+    const a = (await ask(deps({ fetch: chatRoute(refusal).fetcher }))) as { error: string };
+    assert.equal(a.error, "The payment was not accepted (invalid payment group). Check that your wallet holds USDC on TestNet and has opted in to it. You were not charged.");
+    const main = (await payWith(deps({ fetch: chatRoute(refusal).fetcher }), BUYER, { ...NET, name: "mainnet" }, "Hi <C_PERSON_1>")) as { error: string };
+    assert.match(main.error, /holds USDC on MainNet and has opted in/);
+  });
 });

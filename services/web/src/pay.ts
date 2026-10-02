@@ -100,7 +100,7 @@ export async function payWith(deps: PayDeps, address: string, net: PayNetwork, m
     if (signed) return { error: AFTER_APPROVAL, status: 502, transaction };
     throw new Error("The answer could not be read. Nothing was paid.");
   }
-  const result = readAnswer(r.status, text, (name) => r.headers.get(name), settled);
+  const result = readAnswer(r.status, text, (name) => r.headers.get(name), settled, net.name);
   if (!("error" in result)) return result;
   if (signed && r.status >= 500 && /not charged/i.test(result.error)) return { error: AFTER_APPROVAL, status: r.status, transaction };
   // A failure that came with a receipt shows it, so the visitor can check the payment.
