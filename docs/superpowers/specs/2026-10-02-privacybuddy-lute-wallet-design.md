@@ -58,7 +58,9 @@ browser ── Lute signs ──┐
    and shows the receipt link exactly as today.
 
 If Execute is pressed before connecting, the page runs the connect step first
-and carries on.
+and stops there with "Connected. Press Execute again to pay.": without the
+Lute extension the signing pop-up needs a click of its own, or the browser
+blocks it.
 
 ## Server: `services/web`
 
@@ -78,9 +80,21 @@ Then a pass-through to the paywall:
   `payment-signature` if present. No other request header.
 - Sent back unchanged: the status, the body, and the `payment-required`,
   `payment-response`, `x-chainaim-model` and `x-chainaim-data-class` headers.
-- The paywall can't be reached: 502 "Could not reach the payment service. You
-  were not charged."
-- Timeout: 200 seconds, the same as the paywall's own gateway timeout.
+- The paywall can't be reached and no payment header was sent: 502 "Could not
+  reach the payment service. You were not charged."
+- The connection fails after a payment header was sent: 502 "The connection to
+  the payment service failed after your payment was sent. Check your wallet's
+  recent transactions before trying again." The paywall settles before it
+  streams the answer, so once a payment was sent the relay never says "not
+  charged".
+- The answer's body is lost after the paywall answered: 502, keeping any
+  `payment-response` header; with a payment header "The answer was lost after
+  your payment went through. Check your wallet's recent transactions before
+  trying again.", without one "Could not read the payment service's answer.
+  You were not charged."
+- Timeout: 240 seconds (the paywall's 200 s gateway timeout plus margin for
+  its capacity check, payment verify and settle).
+- Body size: at most 256 KB, else 413 "That request is too large."
 - Log line: route, status, upstream status, whether a payment header was
   present, masked length, time. Never the text, the signature or the receipt.
 
@@ -133,7 +147,8 @@ Execute keeps its label and price. While Lute is open the status line says
 
 ## Errors
 
-All shown in the existing red box; in each case nothing is paid.
+All shown in the existing red box. Rule: once Lute has signed, no message says
+"nothing was paid" or "not charged", because the payment may have settled.
 
 | Case | Message |
 |---|---|
@@ -142,7 +157,9 @@ All shown in the existing red box; in each case nothing is paid.
 | Wallet's network differs from the paywall's | Names both networks |
 | Balance known to be below the price | The current "fund it with TestNet USDC" message and the faucet link; nothing is sent |
 | Wallet not opted in to USDC | The wallet needs to opt in to USDC (asset 10458941) first |
-| Paywall or gateway refuses after signing | The gateway's own message; payment settles only on success, so the visitor is not charged |
+| Lute does not answer in time | Lute did not answer in time. Nothing was paid. (Without the extension it adds: if no Lute window appeared, allow pop-ups for this page.) |
+| Paywall refuses the payment (402) | The payment was not accepted (wallet USDC and opt-in); the visitor is not charged |
+| Connection or server error (5xx) after signing | The connection failed after you approved the payment. Check your wallet's recent transactions before trying again. (A relay message that already speaks of the payment is shown as is.) With a receipt link when the payment settled |
 
 ## Testing
 
