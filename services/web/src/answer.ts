@@ -4,7 +4,8 @@
  * Pure, so Node tests it and the browser bundle uses the same code.
  */
 export type Answer = { answer: string; model: string | null; dataClass: string | null; payment: { transaction: string | null; network: string | null } };
-export type Failure = { error: string; status: number };
+/** transaction: the receipt, when the payment settled but the answer was lost. */
+export type Failure = { error: string; status: number; transaction?: string | null };
 
 function explain(status: number, text: string): string {
   if (status === 402) return "The payment was not accepted. Check that your wallet holds TestNet USDC and has opted in to it. You were not charged.";
@@ -30,7 +31,9 @@ export function readAnswer(
   } catch {
     answer = undefined;
   }
-  if (typeof answer !== "string") return { error: "The model's answer could not be read. Check the payment receipt before trying again.", status: 502 };
+  if (typeof answer !== "string") {
+    return { error: "The model's answer could not be read. Check the payment receipt before trying again.", status: 502, transaction: settled?.transaction ?? null };
+  }
   return {
     answer,
     model: header("x-chainaim-model"),

@@ -12,6 +12,7 @@ export type AvmSigner = {
 };
 
 export const CANCELLED = "You cancelled the payment. Nothing was paid.";
+export const NOT_SIGNED = "Lute did not sign the payment. Nothing was paid.";
 
 /** Lute's code for a window the user closed or a request they rejected. */
 const USER_REJECTED = 4100;
@@ -37,7 +38,7 @@ export function luteSigner(address: string, signTxns: SignTxns): AvmSigner {
       return txns.map((_, i) => {
         if (!mine.has(i)) return null;
         const s = signed[i];
-        if (!s) throw new Error("Lute did not sign the payment. Nothing was paid.");
+        if (!s) throw new Error(NOT_SIGNED);
         return s;
       });
     },

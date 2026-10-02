@@ -38,10 +38,12 @@ describe("readAnswer", () => {
     assert.deepEqual(readAnswer(500, "<html>", headers({}), undefined), { error: "The chat service failed (HTTP 500). You were not charged.", status: 500 });
   });
 
-  it("does not hand on an answer it cannot read", () => {
+  it("does not hand on an answer it cannot read, but keeps the receipt", () => {
     assert.deepEqual(readAnswer(200, "{}", headers({}), { transaction: "TX1" }), {
       error: "The model's answer could not be read. Check the payment receipt before trying again.",
       status: 502,
+      transaction: "TX1",
     });
+    assert.equal((readAnswer(200, "{}", headers({}), undefined) as { transaction?: unknown }).transaction, null);
   });
 });

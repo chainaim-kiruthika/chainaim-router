@@ -5,30 +5,18 @@
  * kept in localStorage; Lute keeps the keys.
  */
 import LuteConnect from "@galaxypay/lute-connect";
-import { wrapFetchWithPayment, x402Client, x402HTTPClient } from "@x402/fetch";
-import { ExactAvmScheme } from "@x402/avm/exact/client";
-import { readAnswer, type Answer, type Failure } from "./answer.ts";
-import { readBalance, type Balance, type KnownNetwork } from "./balance.ts";
-import { CANCELLED, luteSigner } from "./lute-signer.ts";
+import type { Answer, Failure } from "./answer.ts";
+import { readBalance, type Balance } from "./balance.ts";
+import { NO_LUTE, payWith, within, type PayNetwork } from "./pay.ts";
 
-export type PayNetwork = { name: KnownNetwork; genesisId: string; algodUrl: string; asset: string };
+export type { PayNetwork };
 
 const KEY = "privacybuddy.lute";
 /** A blocked Lute popup never answers, so every Lute call has a time limit. */
 const CONNECT_MS = 120_000;
-const SIGN_MS = 180_000;
-const NO_LUTE = "Lute could not open. Install the Lute extension, or allow pop-ups for this page.";
-const SIGN_TIMEOUT = "Lute did not answer in time. Nothing was paid.";
-const AFTER_APPROVAL = "The connection failed after you approved the payment. Check your wallet's recent transactions before trying again.";
 
 let lute: LuteConnect | undefined;
 const luteApp = () => (lute ??= new LuteConnect("PrivacyBuddy"));
-
-function within<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>;
-  const timeout = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(message)), ms)));
-  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
-}
 
 export function savedAccount(): { address: string; genesisId: string } | null {
   try {
@@ -69,41 +57,10 @@ export function disconnect(): void {
 
 export const balance = (address: string, net: PayNetwork): Promise<Balance> => readBalance(address, net.name, net.asset);
 
-export async function payAndAsk(address: string, net: PayNetwork, masked: string, maxTokens = 512): Promise<Answer | Failure> {
-  let signed = false;
-  const signer = luteSigner(address, async (txns) => {
-    const out = await within(luteApp().signTxns(txns), SIGN_MS, SIGN_TIMEOUT);
-    signed = true;
-    return out;
-  });
-  const client = new x402Client().register("algorand:*", new ExactAvmScheme(signer, { algodUrl: net.algodUrl }));
-  const paid = wrapFetchWithPayment(fetch, client);
-  let r: Response;
-  try {
-    r = await paid("/api/chat", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: "chainaim/auto", messages: [{ role: "user", content: masked }], max_tokens: maxTokens }),
-    });
-  } catch (e) {
-    const m = String((e as Error)?.message ?? e);
-    if (m.includes(CANCELLED)) throw new Error(CANCELLED);
-    if (m.includes(SIGN_TIMEOUT)) throw new Error(SIGN_TIMEOUT);
-    if (m.includes(NO_LUTE)) throw new Error(NO_LUTE);
-    if (signed) throw new Error(AFTER_APPROVAL);
-    throw new Error(`The payment could not be made (${m.slice(0, 200)}). Nothing was paid.`);
-  }
-  let text: string;
-  try {
-    text = await r.text();
-  } catch {
-    throw new Error(AFTER_APPROVAL);
-  }
-  let settled: { transaction?: string; network?: string } | undefined;
-  try {
-    settled = new x402HTTPClient(client).getPaymentSettleResponse((name) => r.headers.get(name)) as typeof settled;
-  } catch {
-    settled = undefined;
-  }
-  return readAnswer(r.status, text, (name) => r.headers.get(name), settled);
+/** Without the extension, Lute signs in a pop-up window, which the browser may block. */
+const hasExtension = () => Boolean((window as unknown as { lute?: unknown }).lute);
+
+export function payAndAsk(address: string, net: PayNetwork, masked: string, maxTokens = 512, onSigned?: () => void): Promise<Answer | Failure> {
+  const app = luteApp();
+  return payWith({ signTxns: (txns) => app.signTxns(txns), fetch: (input, init) => fetch(input, init), popup: !hasExtension(), onSigned }, address, net, masked, maxTokens);
 }

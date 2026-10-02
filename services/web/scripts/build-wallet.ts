@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 
 const root = new URL("../", import.meta.url);
 export const BUNDLE = new URL("public/wallet.js", root);
-const SOURCES = ["src/wallet-entry.ts", "src/lute-signer.ts", "src/balance.ts", "src/answer.ts", "src/buffer-shim.ts", "package-lock.json", "package.json", "scripts/build-wallet.ts"];
+const SOURCES = ["src/wallet-entry.ts", "src/pay.ts", "src/lute-signer.ts", "src/balance.ts", "src/answer.ts", "src/buffer-shim.ts", "package-lock.json", "package.json", "scripts/build-wallet.ts"];
 
 /** Line endings are normalised so a Windows checkout (autocrlf) hashes the same as Linux. */
 export function sourceHash(): string {
