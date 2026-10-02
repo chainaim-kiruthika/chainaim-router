@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node src/main.ts",
+    "build:wallet": "node scripts/build-wallet.ts",
     "test": "node --test --test-force-exit \"test/*.test.ts\""
   },
   "dependencies": {
@@ -18,5 +19,10 @@
     "@x402/core": "2.27.0",
     "@x402/fetch": "2.27.0",
     "hono": "4.13.9"
+  },
+  "devDependencies": {
+    "buffer": "6.0.3",
+    "esbuild": "0.28.2",
+    "lute-connect": "2.0.1"
   }
 }

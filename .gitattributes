@@ -1,2 +1,4 @@
 # PDFs are binary: never convert their line endings
 *.pdf binary
+# generated browser bundle (npm --prefix services/web run build:wallet)
+services/web/public/wallet.js -diff linguist-generated
