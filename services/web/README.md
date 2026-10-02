@@ -51,6 +51,11 @@ npm --prefix services/web run build:wallet
 
 A test fails if the bundle is older than its sources.
 
+## Deploy
+
+The page deploys to Vercel and calls the paywall on Railway: see
+`docs/deploy/vercel.md`. `vercel.json` and `npm run build:vercel` do the build.
+
 ## Tests
 
 ```bash
