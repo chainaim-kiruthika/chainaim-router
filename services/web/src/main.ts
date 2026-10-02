@@ -37,6 +37,7 @@ const app = createWebApp({
   buyer,
   maskModule: browserMaskModule(),
   pageFile: new URL("../public/index.html", import.meta.url),
+  walletFile: new URL("../public/wallet.js", import.meta.url),
   log: (line) => console.log(JSON.stringify({ ts: new Date().toISOString(), ...line })),
 });
 

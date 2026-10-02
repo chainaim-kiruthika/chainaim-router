@@ -9,13 +9,13 @@ import type { Context } from "hono";
 import type { Payer } from "./buyer.ts";
 import { Limits } from "./limits.ts";
 import { detect } from "./mask.ts";
-import { networkName, readQuote, type Quote } from "./wallets.ts";
+import { MAX_MASKED_CHARS, registerRelay } from "./relay.ts";
+import { networkInfo, networkName, readQuote, type Quote } from "./wallets.ts";
 import { readBalance, type Balance } from "./balance.ts";
 
 const CHAT = "/v1/chat/completions";
 const SCAN = "/v1/privacy/scan";
-/** The gateway's chat limit, in characters of message text. */
-export const MAX_MASKED_CHARS = 48_000;
+export { MAX_MASKED_CHARS };
 
 export type Deps = {
   paywallUrl: string;
@@ -26,6 +26,8 @@ export type Deps = {
   maskModule: string;
   /** The page, read on every request so an edit shows without a restart. */
   pageFile: URL;
+  /** public/wallet.js: the Lute and x402 browser bundle (npm run build:wallet). */
+  walletFile: URL;
   fetcher?: typeof fetch;
   now?: () => number;
   /** Status, sizes and timing only. Never text, placeholders or the map. */
@@ -69,7 +71,7 @@ export function createWebApp(deps: Deps): Hono {
 
   app.use("*", async (c, next) => {
     await next();
-    c.header("content-security-policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
+    c.header("content-security-policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://testnet-api.algonode.cloud https://mainnet-api.algonode.cloud; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
     c.header("x-content-type-options", "nosniff");
     c.header("referrer-policy", "no-referrer");
   });
@@ -77,12 +79,21 @@ export function createWebApp(deps: Deps): Hono {
   app.get("/", async (c) => c.html(await readFile(deps.pageFile, "utf8")));
   app.get("/healthz", (c) => c.json({ status: "ok" }));
   app.get("/client-mask.js", (c) => c.body(deps.maskModule, 200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" }));
+  app.get("/wallet.js", async (c) => {
+    const js = await readFile(deps.walletFile, "utf8").catch(() => undefined);
+    if (js === undefined) return c.json({ error: { message: "public/wallet.js is not built. Run npm run build:wallet." } }, 404);
+    return c.body(js, 200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" });
+  });
 
   app.get("/api/wallets", async (c) => {
     const q = await quote().catch(() => undefined);
     const b = await balance().catch(() => undefined);
+    const network = q ? networkName(q.quote.network) : "unknown";
+    const info = networkInfo(network);
     return c.json({
-      network: q ? networkName(q.quote.network) : "unknown",
+      network,
+      genesisId: info?.genesisId ?? null,
+      algodUrl: info?.algodUrl ?? null,
       asset: q?.quote.asset ?? null,
       buyer: deps.buyer ? { address: deps.buyer.address, usdc: b?.usdc ?? null, algo: b?.algo ?? null, optedIn: b?.optedIn ?? null } : null,
       payTo: q ? { address: q.quote.payTo } : null,
@@ -91,6 +102,7 @@ export function createWebApp(deps: Deps): Hono {
   });
 
   registerExecute(app, { deps, limits, quote, balance, now, log });
+  registerRelay(app, { paywallUrl: deps.paywallUrl, fetcher, now, log });
 
   app.notFound((c) => c.json({ error: { message: "Not found." } }, 404));
   return app;

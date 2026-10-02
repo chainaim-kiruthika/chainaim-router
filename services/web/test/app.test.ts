@@ -7,6 +7,7 @@ import { browserMaskModule } from "../src/mask.ts";
 const TESTNET = "algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=";
 const PAYTO = "EA7WASZQYXGGRSMGYQLRI6TR2PQCVDC42QULUT5N62UMYO4A6ADCJ6464M";
 const PAGE = new URL("../public/index.html", import.meta.url);
+const WALLET = new URL("../public/wallet.js", import.meta.url);
 
 const quoteHeader = (amount = "10000") =>
   Buffer.from(JSON.stringify({ accepts: [{ scheme: "exact", network: TESTNET, amount, asset: "10458941", payTo: PAYTO }] })).toString("base64");
@@ -50,6 +51,7 @@ export function makeApp(over: Partial<Parameters<typeof createWebApp>[0]> = {}) 
     buyer: undefined,
     maskModule: browserMaskModule(),
     pageFile: PAGE,
+    walletFile: WALLET,
     fetcher: fakeFetch({ usdc: 5 }),
     log: (line) => logs.push(line),
     ...over,
@@ -65,8 +67,15 @@ describe("page and static routes", () => {
     assert.match(r.headers.get("content-type") ?? "", /text\/html/);
     assert.match(r.headers.get("content-security-policy") ?? "", /default-src 'self'/);
     assert.match(r.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
+    assert.match(r.headers.get("content-security-policy") ?? "", /connect-src 'self' https:\/\/testnet-api\.algonode\.cloud/);
     assert.equal(r.headers.get("x-content-type-options"), "nosniff");
     assert.match(await r.text(), /PrivacyBuddy/);
+  });
+
+  it("answers a JSON 404 for /wallet.js when the bundle is not built", async () => {
+    const r = await makeApp({ walletFile: new URL("../public/no-such-file.js", import.meta.url) }).app.request("/wallet.js");
+    assert.equal(r.status, 404);
+    assert.match(((await r.json()) as any).error.message, /build:wallet/);
   });
 
   it("answers /healthz", async () => {
@@ -93,6 +102,8 @@ describe("GET /api/wallets", () => {
     const r = await makeApp({ buyer: payer }).app.request("/api/wallets");
     assert.deepEqual(await r.json(), {
       network: "testnet",
+      genesisId: "testnet-v1.0",
+      algodUrl: "https://testnet-api.algonode.cloud",
       asset: "10458941",
       buyer: { address: "BUYERADDRESS", usdc: 5, algo: 4, optedIn: true },
       payTo: { address: PAYTO },
