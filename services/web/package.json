@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node src/main.ts",
     "build:wallet": "node scripts/build-wallet.ts",
+    "build:vercel": "node scripts/build-vercel.ts",
     "test": "node --test --test-force-exit \"test/*.test.ts\""
   },
   "dependencies": {

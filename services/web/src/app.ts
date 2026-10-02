@@ -17,6 +17,12 @@ const CSP =
   "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; " +
   "connect-src 'self' https://testnet-api.algonode.cloud https://mainnet-api.algonode.cloud; " +
   "frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+/** Sent on every response; scripts/build-vercel.ts gives Vercel's static files the same set. */
+export const SECURITY_HEADERS: Record<string, string> = {
+  "content-security-policy": CSP,
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+};
 
 export type Deps = {
   paywallUrl: string;
@@ -60,9 +66,7 @@ export function createWebApp(deps: Deps): Hono {
 
   app.use("*", async (c, next) => {
     await next();
-    c.header("content-security-policy", CSP);
-    c.header("x-content-type-options", "nosniff");
-    c.header("referrer-policy", "no-referrer");
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) c.header(name, value);
   });
 
   app.get("/", async (c) => c.html(await readFile(deps.pageFile, "utf8")));

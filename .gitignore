@@ -14,3 +14,6 @@ packages/route-engine/node_modules/
 
 # local test console: its gateway key stays on this PC
 test-console/local-gateway-key.txt
+
+# Vercel build output and local project link (services/web)
+.vercel/
