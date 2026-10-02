@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { networkName, readBalance, readQuote } from "../src/wallets.ts";
+import { networkInfo, networkName, readQuote } from "../src/wallets.ts";
 
 const TESTNET = "algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=";
 const PAYTO = "EA7WASZQYXGGRSMGYQLRI6TR2PQCVDC42QULUT5N62UMYO4A6ADCJ6464M";
@@ -41,29 +41,9 @@ describe("readQuote", () => {
   });
 });
 
-describe("readBalance", () => {
-  const node = (body: unknown, status = 200) => async () => new Response(JSON.stringify(body), { status });
-
-  it("reads ALGO and the USDC held", async () => {
-    const b = await readBalance("ADDR", "testnet", "10458941", node({ amount: 3_999_000, assets: [{ "asset-id": 10458941, amount: 2_500_000 }] }));
-    assert.deepEqual(b, { algo: 3.999, usdc: 2.5, optedIn: true });
-  });
-
-  it("reports an account that has not opted in to the asset", async () => {
-    const b = await readBalance("ADDR", "testnet", "10458941", node({ amount: 4_000_000, assets: [] }));
-    assert.deepEqual(b, { algo: 4, usdc: 0, optedIn: false });
-  });
-
-  it("uses the node for the right network", async () => {
-    let seen = "";
-    await readBalance("ADDR", "mainnet", "31566704", async (input) => {
-      seen = String(input);
-      return new Response("{}");
-    });
-    assert.match(seen, /^https:\/\/mainnet-api\.algonode\.cloud\/v2\/accounts\/ADDR$/);
-  });
-
-  it("fails clearly when the node errors", async () => {
-    await assert.rejects(readBalance("ADDR", "testnet", "1", node({}, 500)), /HTTP 500/);
+describe("networkInfo", () => {
+  it("gives the genesis ID and algod node for a known network, and null otherwise", () => {
+    assert.deepEqual(networkInfo("testnet"), { genesisId: "testnet-v1.0", algodUrl: "https://testnet-api.algonode.cloud" });
+    assert.equal(networkInfo("unknown"), null);
   });
 });

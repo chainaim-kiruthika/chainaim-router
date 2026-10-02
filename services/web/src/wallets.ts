@@ -1,14 +1,14 @@
 /**
  * Reads that feed the wallet chips: what the paywall asks for (pay-to address,
- * network, asset, price), taken from its own 402 quote, and what a wallet holds,
- * taken from a public Algorand node. Both are read-only.
+ * network, asset, price), taken from its own 402 quote. The wallet balance
+ * read lives in balance.ts, which the browser also uses.
  */
+import { NETWORKS } from "./balance.ts";
+
 export type Quote = { payTo: string; network: string; asset: string; price: number };
 export type NetworkName = "testnet" | "mainnet" | "unknown";
-export type Balance = { algo: number; usdc: number; optedIn: boolean };
 
 const TESTNET = "algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=";
-const NODES = { testnet: "https://testnet-api.algonode.cloud", mainnet: "https://mainnet-api.algonode.cloud" } as const;
 
 export function networkName(caip2: string): NetworkName {
   if (caip2 === TESTNET) return "testnet";
@@ -33,10 +33,7 @@ export async function readQuote(paywallUrl: string, route: string, fetcher: type
   return { payTo: accepts.payTo, network: accepts.network, asset: String(accepts.asset), price: Number(accepts.amount) / 1e6 };
 }
 
-export async function readBalance(address: string, network: "testnet" | "mainnet", asset: string, fetcher: typeof fetch = fetch): Promise<Balance> {
-  const r = await fetcher(`${NODES[network]}/v2/accounts/${address}`, { signal: AbortSignal.timeout(8000) });
-  if (!r.ok) throw new Error(`the Algorand node answered HTTP ${r.status}`);
-  const j = (await r.json()) as { amount?: number; assets?: { "asset-id": number; amount: number }[] };
-  const held = (j.assets ?? []).find((a) => String(a["asset-id"]) === asset);
-  return { algo: (j.amount ?? 0) / 1e6, usdc: held ? held.amount / 1e6 : 0, optedIn: held !== undefined };
+/** Lute's genesis ID and the public algod node for a known network. */
+export function networkInfo(name: NetworkName): { genesisId: string; algodUrl: string } | null {
+  return name === "unknown" ? null : NETWORKS[name];
 }

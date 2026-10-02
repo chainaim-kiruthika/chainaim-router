@@ -9,7 +9,8 @@ import type { Context } from "hono";
 import type { Payer } from "./buyer.ts";
 import { Limits } from "./limits.ts";
 import { detect } from "./mask.ts";
-import { networkName, readBalance, readQuote, type Balance, type Quote } from "./wallets.ts";
+import { networkName, readQuote, type Quote } from "./wallets.ts";
+import { readBalance, type Balance } from "./balance.ts";
 
 const CHAT = "/v1/chat/completions";
 const SCAN = "/v1/privacy/scan";
