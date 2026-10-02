@@ -12,22 +12,16 @@ describe("loadConfig", () => {
   });
 
   it("applies the defaults and trims a trailing slash", () => {
-    assert.deepEqual(loadConfig({ PAYWALL_URL: "http://127.0.0.1:8080/" }), {
-      port: 8740,
-      host: "127.0.0.1",
-      paywallUrl: "http://127.0.0.1:8080",
-      ratePerMinute: 5,
-      maxExecutesPerHour: 30,
-    });
+    assert.deepEqual(loadConfig({ PAYWALL_URL: "http://127.0.0.1:8080/" }), { port: 8740, host: "127.0.0.1", paywallUrl: "http://127.0.0.1:8080" });
   });
 
   it("reads overrides", () => {
-    const c = loadConfig({ PAYWALL_URL: "https://paywall.example", PORT: "9000", HOST: "0.0.0.0", RATE_PER_MINUTE: "2", MAX_EXECUTES_PER_HOUR: "10" });
-    assert.deepEqual([c.port, c.host, c.ratePerMinute, c.maxExecutesPerHour], [9000, "0.0.0.0", 2, 10]);
+    const c = loadConfig({ PAYWALL_URL: "https://paywall.example", PORT: "9000", HOST: "0.0.0.0" });
+    assert.deepEqual([c.port, c.host], [9000, "0.0.0.0"]);
   });
 
-  it("rejects a number out of range", () => {
-    assert.throws(() => loadConfig({ PAYWALL_URL: "http://x.test", RATE_PER_MINUTE: "0" }), /RATE_PER_MINUTE/);
+  it("rejects a port out of range", () => {
     assert.throws(() => loadConfig({ PAYWALL_URL: "http://x.test", PORT: "abc" }), /PORT/);
+    assert.throws(() => loadConfig({ PAYWALL_URL: "http://x.test", PORT: "70000" }), /PORT/);
   });
 });

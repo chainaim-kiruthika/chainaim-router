@@ -24,9 +24,6 @@ function makeApp(fetcher: typeof fetch) {
   const logs: Record<string, unknown>[] = [];
   const app = createWebApp({
     paywallUrl: "http://paywall.test",
-    ratePerMinute: 100,
-    maxExecutesPerHour: 100,
-    buyer: undefined,
     maskModule: browserMaskModule(),
     pageFile: PAGE,
     walletFile: WALLET,

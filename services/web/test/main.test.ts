@@ -24,16 +24,9 @@ describe("main", () => {
     assert.match(r.stderr, /PAYWALL_URL/);
   });
 
-  it("exits with a clear message, without echoing the words, when BUYER_MNEMONIC is not a valid phrase", () => {
-    const r = spawnSync(process.execPath, [MAIN], { env: { ...process.env, PAYWALL_URL: "http://127.0.0.1:1", BUYER_MNEMONIC: "totally invalid words here" }, encoding: "utf8" });
-    assert.equal(r.status, 1);
-    assert.match(r.stderr, /BUYER_MNEMONIC/);
-    assert.ok(!r.stderr.includes("totally invalid words here"));
-  });
-
-  it("starts without a buyer key and serves the page and /healthz", async () => {
+  it("starts and serves the page, /wallet.js and /healthz", async () => {
     const port = 18741;
-    const child = spawn(process.execPath, [MAIN], { env: { ...process.env, PAYWALL_URL: "http://127.0.0.1:1", PORT: String(port), BUYER_MNEMONIC: "" }, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [MAIN], { env: { ...process.env, PAYWALL_URL: "http://127.0.0.1:1", PORT: String(port) }, stdio: ["ignore", "pipe", "pipe"] });
     try {
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error("did not start")), 15000);
@@ -50,6 +43,8 @@ describe("main", () => {
       const page = await getText(`http://127.0.0.1:${port}/`);
       assert.equal(page.status, 200);
       assert.match(page.body, /PrivacyBuddy/);
+      const wallet = await getText(`http://127.0.0.1:${port}/wallet.js`);
+      assert.equal(wallet.status, 200);
     } finally {
       // Wait for the child to be gone and close its pipes, or Node on Windows can crash while shutting down.
       const exited = new Promise((resolve) => child.once("exit", resolve));
