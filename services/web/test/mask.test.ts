@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { browserMaskModule, detect } from "../src/mask.ts";
 
 /** The message the page's "Try an example" button fills in. Keep in step with public/index.html. */
-export const EXAMPLE = "Name: Priya Raman\nEmail: priya.raman@example.com\nPhone: +91 98765 43210\nPAN: AJZPR4821K\n\nPlease write a short, polite email asking my landlord to refund my security deposit of INR 50,000.";
+export const EXAMPLE = "Name: Rohan Mehta\nEmail: rohan.mehta@example.com\nPhone: +91 98765 43210\nPAN: ABCPM1234K\nAadhaar: 2345 6789 0123\nBank account: 123456789012\nIFSC: ABCD0001234\n\nPlease write a short, polite note asking the applicant to send the last three salary slips for home loan application HL-2041 (INR 12,00,000).";
 
 async function load() {
   return import("data:text/javascript;base64," + Buffer.from(browserMaskModule()).toString("base64"));
@@ -25,7 +25,7 @@ describe("the masking module", () => {
   it("the page's example message is fully masked", async () => {
     const m = await load();
     const r = m.maskText(EXAMPLE);
-    for (const secret of ["Priya Raman", "priya.raman@example.com", "98765 43210", "AJZPR4821K"]) {
+    for (const secret of ["Rohan Mehta", "rohan.mehta@example.com", "98765 43210", "ABCPM1234K", "2345 6789 0123", "123456789012", "ABCD0001234"]) {
       assert.ok(!r.masked.includes(secret), `${secret} is masked`);
     }
   });

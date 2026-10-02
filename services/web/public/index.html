@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PrivacyBuddy: spend your tokens wisely</title>
-<meta name="description" content="Private AI chat. Your secrets are masked on your device, and you pay per answer in USDC on Algorand.">
+<meta name="description" content="Private AI chat for financial teams. Sensitive details are hidden on your device before anything is sent, and you pay per answer in USDC on Algorand.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M16 6l8 3v6c0 5-3.4 8.6-8 11-4.6-2.4-8-6-8-11V9z' fill='white'/%3E%3C/svg%3E">
 <style>
   :root {
@@ -48,6 +48,7 @@
   .trust { list-style: none; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 0; padding: 0; }
   .trust li { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); font-size: .85rem; color: var(--muted); }
   .trust li::before { content: "✓ "; color: var(--ok); font-weight: 800; }
+  .covers { margin: 14px auto 0; max-width: 38rem; color: var(--muted); font-size: .85rem; }
 
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: clamp(16px, 4vw, 28px); box-shadow: var(--shadow); }
   .steps { display: flex; gap: 8px; list-style: none; margin: 0 0 18px; padding: 0; }
@@ -116,8 +117,9 @@
 <main>
   <section class="hero">
     <h1>Spend your tokens <span class="grad">wisely</span></h1>
-    <p class="lead">Private AI chat. Your secrets are masked on your device, and you pay per answer in USDC on Algorand.</p>
-    <ul class="trust"><li>Masked on your device</li><li>Pay per answer with x402</li><li>No account needed</li></ul>
+    <p class="lead">Private AI chat for financial teams. Sensitive details are hidden on your device before anything is sent, and you pay per answer in USDC on Algorand.</p>
+    <ul class="trust"><li>Masked on your device</li><li>Pay per answer with x402</li><li>No sign-up needed</li></ul>
+    <p class="covers">Hidden automatically: PAN, Aadhaar, bank account and IFSC numbers, card numbers, emails, phone numbers, and names after a label like “Name:”.</p>
   </section>
 
   <section class="card" aria-labelledby="chatTitle">
@@ -132,7 +134,7 @@
       <button class="btn primary" id="maskBtn" type="button">Mask my message</button>
       <button class="btn ghost" id="exampleBtn" type="button">Try an example</button>
     </div>
-    <p class="hint">Masking runs on your device with pattern checks. ChainAim's server scans the masked text again before any model sees it.</p>
+    <p class="hint">Masking runs on your device with pattern checks, and names are masked only when they follow a label such as “Name:”. ChainAim's server scans the masked text again before any model sees it.</p>
 
     <div class="pane" id="maskedPane" hidden>
       <span class="lab2">What will be sent (masked)</span>
@@ -183,7 +185,7 @@ const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); for (const k of kids) e.append(k); return e; };
 const short = (a) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "…");
 /** Keep in step with EXAMPLE in test/mask.test.ts. */
-const EXAMPLE = "Name: Priya Raman\nEmail: priya.raman@example.com\nPhone: +91 98765 43210\nPAN: AJZPR4821K\n\nPlease write a short, polite email asking my landlord to refund my security deposit of INR 50,000.";
+const EXAMPLE = "Name: Rohan Mehta\nEmail: rohan.mehta@example.com\nPhone: +91 98765 43210\nPAN: ABCPM1234K\nAadhaar: 2345 6789 0123\nBank account: 123456789012\nIFSC: ABCD0001234\n\nPlease write a short, polite note asking the applicant to send the last three salary slips for home loan application HL-2041 (INR 12,00,000).";
 const PLACEHOLDER = /(<C_[A-Z_]+_\d+>|\[CARD REMOVED\])/;
 /** Friendly names for what client-mask.ts finds: [one, many]. */
 const KIND = {
