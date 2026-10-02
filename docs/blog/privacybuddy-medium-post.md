@@ -101,7 +101,7 @@ Chat forwards tool definitions, the `response_format` schema, stop sequences, `t
 
 Chat runs on OpenRouter's free models, which have rate limits, so capacity is limited. Scan and mask do not depend on OpenRouter.
 
-The deployment runs on Algorand TestNet today, so the USDC is TestNet USDC, and the web page's buyer key is a hot wallet on a server. That is fine for a TestNet demo and wrong for real money. Before any MainNet use it needs wallet connect.
+The deployment runs on Algorand MainNet, so each call costs real USDC ($0.01). The web page holds no key: each visitor pays from their own Lute wallet and approves every payment there.
 
 ## Try it
 
@@ -116,7 +116,7 @@ node scripts/smoke.ts --chat
 
 There is also a command line tool, private-ask, that masks a text file on your computer before paying and sending it. Its dry-run flag shows what would leave your machine and sends and pays nothing.
 
-We built this for the Algorand Global x402 Challenge. The live paywall is at https://privacybuddy.up.railway.app, on Algorand TestNet today. Its 402 responses carry the x402 Bazaar discovery metadata and the challenge tag `x402-global-challenge`, so an agent can read the price, the pay-to address and an example request before it pays anything. You can see that quote yourself without a wallet, from the paywall folder of the repo:
+We built this for the Algorand Global x402 Challenge. The live paywall is at https://privacybuddy.up.railway.app, on Algorand MainNet. Its 402 responses carry the x402 Bazaar discovery metadata and the challenge tag `x402-global-challenge`, so an agent can read the price, the pay-to address and an example request before it pays anything. You can see that quote yourself without a wallet, from the paywall folder of the repo:
 
 ```bash
 node scripts/pay.ts --dry-run https://privacybuddy.up.railway.app/v1/privacy/scan '{"text":"Jane Roe"}'
