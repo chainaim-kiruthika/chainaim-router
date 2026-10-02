@@ -4,7 +4,7 @@
  * functions from /wallet.js. Only the address and its network's genesis ID are
  * kept in localStorage; Lute keeps the keys.
  */
-import LuteConnect from "lute-connect";
+import LuteConnect from "@galaxypay/lute-connect";
 import { wrapFetchWithPayment, x402Client, x402HTTPClient } from "@x402/fetch";
 import { ExactAvmScheme } from "@x402/avm/exact/client";
 import { readAnswer, type Answer, type Failure } from "./answer.ts";
@@ -18,6 +18,8 @@ const KEY = "privacybuddy.lute";
 const CONNECT_MS = 120_000;
 const SIGN_MS = 180_000;
 const NO_LUTE = "Lute could not open. Install the Lute extension, or allow pop-ups for this page.";
+const SIGN_TIMEOUT = "Lute did not answer in time. Nothing was paid.";
+const AFTER_APPROVAL = "The connection failed after you approved the payment. Check your wallet's recent transactions before trying again.";
 
 let lute: LuteConnect | undefined;
 const luteApp = () => (lute ??= new LuteConnect("PrivacyBuddy"));
@@ -43,7 +45,9 @@ export async function connect(genesisId: string): Promise<string> {
     addresses = await within(luteApp().connect(genesisId), CONNECT_MS, NO_LUTE);
   } catch (e) {
     const m = String((e as Error)?.message ?? "");
-    throw new Error(/cancel/i.test(m) ? "You closed Lute before connecting. Nothing was shared." : NO_LUTE);
+    if (/cancel/i.test(m)) throw new Error("You closed Lute before connecting. Nothing was shared.");
+    if (m === NO_LUTE) throw new Error(NO_LUTE);
+    throw new Error(`Lute could not connect: ${m.slice(0, 200)}`);
   }
   const address = addresses[0];
   if (!address) throw new Error("Lute did not share an account.");
@@ -66,7 +70,12 @@ export function disconnect(): void {
 export const balance = (address: string, net: PayNetwork): Promise<Balance> => readBalance(address, net.name, net.asset);
 
 export async function payAndAsk(address: string, net: PayNetwork, masked: string, maxTokens = 512): Promise<Answer | Failure> {
-  const signer = luteSigner(address, (txns) => within(luteApp().signTxns(txns), SIGN_MS, NO_LUTE));
+  let signed = false;
+  const signer = luteSigner(address, async (txns) => {
+    const out = await within(luteApp().signTxns(txns), SIGN_MS, SIGN_TIMEOUT);
+    signed = true;
+    return out;
+  });
   const client = new x402Client().register("algorand:*", new ExactAvmScheme(signer, { algodUrl: net.algodUrl }));
   const paid = wrapFetchWithPayment(fetch, client);
   let r: Response;
@@ -79,10 +88,17 @@ export async function payAndAsk(address: string, net: PayNetwork, masked: string
   } catch (e) {
     const m = String((e as Error)?.message ?? e);
     if (m.includes(CANCELLED)) throw new Error(CANCELLED);
+    if (m.includes(SIGN_TIMEOUT)) throw new Error(SIGN_TIMEOUT);
     if (m.includes(NO_LUTE)) throw new Error(NO_LUTE);
+    if (signed) throw new Error(AFTER_APPROVAL);
     throw new Error(`The payment could not be made (${m.slice(0, 200)}). Nothing was paid.`);
   }
-  const text = await r.text();
+  let text: string;
+  try {
+    text = await r.text();
+  } catch {
+    throw new Error(AFTER_APPROVAL);
+  }
   let settled: { transaction?: string; network?: string } | undefined;
   try {
     settled = new x402HTTPClient(client).getPaymentSettleResponse((name) => r.headers.get(name)) as typeof settled;

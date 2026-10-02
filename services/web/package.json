@@ -21,8 +21,8 @@
     "hono": "4.13.9"
   },
   "devDependencies": {
+    "@galaxypay/lute-connect": "3.0.1",
     "buffer": "6.0.3",
-    "esbuild": "0.28.2",
-    "lute-connect": "2.0.1"
+    "esbuild": "0.28.2"
   }
 }

@@ -9,8 +9,12 @@ describe("public/wallet.js", () => {
     assert.match(head, new RegExp(`source sha256 ${sourceHash()}`));
   });
 
-  it("exports what the page imports", () => {
+  it("exports exactly what the page imports", () => {
     const js = readFileSync(BUNDLE, "utf8");
-    for (const name of ["savedAccount", "connect", "disconnect", "balance", "payAndAsk"]) assert.match(js, new RegExp(`\\b${name}\\b`), name);
+    const start = js.lastIndexOf("export{");
+    assert.ok(start >= 0, "no export clause");
+    const clause = js.slice(start + "export{".length, js.indexOf("}", start));
+    const names = clause.split(",").map((entry) => entry.trim().split(" as ").pop()!).sort();
+    assert.deepEqual(names, ["balance", "connect", "disconnect", "payAndAsk", "savedAccount"]);
   });
 });
