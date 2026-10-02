@@ -6,13 +6,19 @@
  * it logs neither the text nor the payment.
  */
 import type { Context, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { detect } from "./mask.ts";
 
 const CHAT = "/v1/chat/completions";
 /** The gateway's chat limit, in characters of message text. */
 export const MAX_MASKED_CHARS = 48_000;
-/** The same as the paywall's own gateway timeout. */
-const RELAY_TIMEOUT_MS = 200_000;
+/**
+ * The paywall's own 200 s gateway timeout, plus margin for its capacity check,
+ * payment verify and on-chain settle, which all happen inside this one call.
+ */
+const RELAY_TIMEOUT_MS = 240_000;
+/** A chat request is at most 48,000 characters of text plus a little JSON. */
+const MAX_BODY_BYTES = 256 * 1024;
 /** A signed payment group is a few KB; anything far larger is not ours. */
 const MAX_SIGNATURE_CHARS = 65_536;
 /** Response headers the page needs; nothing else from the paywall is passed on. */
@@ -28,7 +34,7 @@ type RelayCtx = {
   log: (line: Record<string, unknown>) => void;
 };
 
-const fail = (c: Context, status: 400 | 502, message: string) => c.json({ error: { message } }, status);
+const fail = (c: Context, status: 400 | 413 | 502, message: string) => c.json({ error: { message } }, status);
 
 /** The validated request, rebuilt from known fields only, or the reason it was refused. */
 export function checkChat(body: unknown): ChatBody | string {
@@ -57,10 +63,19 @@ export function checkChat(body: unknown): ChatBody | string {
 export function registerRelay(app: Hono, ctx: RelayCtx): void {
   const { paywallUrl, fetcher, now, log } = ctx;
 
-  app.post("/api/chat", async (c) => {
+  const tooLarge = bodyLimit({
+    maxSize: MAX_BODY_BYTES,
+    onError: (c) => {
+      log({ route: "chat", status: 413, withPayment: c.req.header("payment-signature") !== undefined });
+      return fail(c, 413, "That request is too large.");
+    },
+  });
+
+  app.post("/api/chat", tooLarge, async (c) => {
     const started = now();
     const signature = c.req.header("payment-signature");
-    const done = (status: number, extra: Record<string, unknown> = {}) => log({ route: "chat", status, paid: signature !== undefined, ms: now() - started, ...extra });
+    // withPayment: a payment header came with the request (not that it settled).
+    const done = (status: number, extra: Record<string, unknown> = {}) => log({ route: "chat", status, withPayment: signature !== undefined, ms: now() - started, ...extra });
 
     if (signature !== undefined && signature.length > MAX_SIGNATURE_CHARS) {
       done(400);
@@ -82,6 +97,10 @@ export function registerRelay(app: Hono, ctx: RelayCtx): void {
       });
     } catch {
       done(502);
+      // Once a payment was forwarded, the paywall may have settled it before the connection failed.
+      if (signature !== undefined) {
+        return fail(c, 502, "The connection to the payment service failed after your payment was sent. Check your wallet's recent transactions before trying again.");
+      }
       return fail(c, 502, "Could not reach the payment service. You were not charged.");
     }
 
@@ -90,7 +109,19 @@ export function registerRelay(app: Hono, ctx: RelayCtx): void {
       const value = upstream.headers.get(name);
       if (value !== null) headers[name] = value;
     }
-    const body = await upstream.arrayBuffer();
+    let body: ArrayBuffer;
+    try {
+      body = await upstream.arrayBuffer();
+    } catch {
+      // The paywall settles before it streams the answer, so a paid body lost here may already be paid for.
+      done(502, { upstream: upstream.status, bodyLost: true });
+      const receipt = headers["payment-response"];
+      const message =
+        signature !== undefined
+          ? "The answer was lost after your payment went through. Check your wallet's recent transactions before trying again."
+          : "Could not read the payment service's answer. You were not charged.";
+      return c.json({ error: { message } }, 502, receipt !== undefined ? { "payment-response": receipt } : {});
+    }
     done(upstream.status, { upstream: upstream.status, maskedChars: checked.messages[0].content.length });
     return new Response(body, { status: upstream.status, headers });
   });

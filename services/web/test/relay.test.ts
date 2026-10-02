@@ -115,6 +115,51 @@ describe("POST /api/chat", () => {
     assert.match(await errorOf(r), /Could not reach the payment service. You were not charged./);
   });
 
+  it("warns to check the wallet when the paywall fails after a payment was sent", async () => {
+    const { fetcher } = paywall(() => {
+      throw new Error("socket hang up");
+    });
+    const r = await post(makeApp(fetcher).app, chat("hi"), { "payment-signature": "SIGNED" });
+    assert.equal(r.status, 502);
+    const message = await errorOf(r);
+    assert.match(message, /The connection to the payment service failed after your payment was sent. Check your wallet's recent transactions before trying again./);
+    assert.doesNotMatch(message, /not charged/);
+  });
+
+  it("keeps the receipt and warns when the answer is lost after the payment went through", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"choices":[{"mess'));
+        controller.error(new Error("connection reset"));
+      },
+    });
+    const { fetcher } = paywall(() => new Response(body, { status: 200, headers: { "payment-response": "RECEIPT", "content-type": "application/json" } }));
+    const { app, logs } = makeApp(fetcher);
+    const r = await post(app, chat("hi"), { "payment-signature": "SIGNED" });
+    assert.equal(r.status, 502);
+    assert.equal(r.headers.get("payment-response"), "RECEIPT");
+    assert.match(await errorOf(r), /after your payment went through/);
+    assert.ok(logs.some((l) => l.route === "chat" && l.status === 502 && l.bodyLost === true && l.upstream === 200), JSON.stringify(logs));
+  });
+
+  it("says not charged when an unpaid answer cannot be read", async () => {
+    const body = new ReadableStream<Uint8Array>({ start: (controller) => controller.error(new Error("reset")) });
+    const { fetcher } = paywall(() => new Response(body, { status: 402 }));
+    const r = await post(makeApp(fetcher).app, chat("hi"));
+    assert.equal(r.status, 502);
+    assert.match(await errorOf(r), /Could not read the payment service's answer. You were not charged./);
+  });
+
+  it("refuses a body over 256 KB with 413 without calling the paywall", async () => {
+    const { fetcher, seen } = paywall(() => new Response("{}"));
+    const { app, logs } = makeApp(fetcher);
+    const r = await post(app, chat("a".repeat(300 * 1024)));
+    assert.equal(r.status, 413);
+    assert.equal(await errorOf(r), "That request is too large.");
+    assert.equal(seen.length, 0);
+    assert.ok(logs.some((l) => l.route === "chat" && l.status === 413));
+  });
+
   it("never logs the text, the payment header or the receipt", async () => {
     const { fetcher } = paywall(() => Response.json({}, { headers: { "payment-response": "RECEIPT-77" } }));
     const { app, logs } = makeApp(fetcher);
@@ -123,6 +168,7 @@ describe("POST /api/chat", () => {
     assert.ok(logs.length > 0, "something is logged");
     for (const s of ["secret-marker-7781", "C_PERSON_1", "SIG-99", "RECEIPT-77"]) assert.ok(!all.includes(s), s);
     assert.equal(logs[0].route, "chat");
-    assert.equal(logs[0].paid, true);
+    assert.equal(logs[0].withPayment, true);
+    assert.equal("paid" in logs[0], false);
   });
 });
