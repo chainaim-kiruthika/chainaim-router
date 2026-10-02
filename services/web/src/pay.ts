@@ -75,6 +75,8 @@ export async function payWith(deps: PayDeps, address: string, net: PayNetwork, m
       body: JSON.stringify({ model: "chainaim/auto", messages: [{ role: "user", content: masked }], max_tokens: maxTokens }),
     });
   } catch (e) {
+    // The visitor sees one plain sentence; the console keeps the real error for debugging (it holds no text or keys).
+    console.error("[privacybuddy] paid call failed", { signed, error: e });
     const m = String((e as Error)?.message ?? e);
     if (m.includes(CANCELLED)) throw new Error(CANCELLED);
     if (m.includes(timeoutMessage)) throw new Error(timeoutMessage);
@@ -93,7 +95,8 @@ export async function payWith(deps: PayDeps, address: string, net: PayNetwork, m
   let text: string;
   try {
     text = await r.text();
-  } catch {
+  } catch (e) {
+    console.error("[privacybuddy] reading the answer failed", { signed, status: r.status, error: e });
     if (signed) return { error: AFTER_APPROVAL, status: 502, transaction };
     throw new Error("The answer could not be read. Nothing was paid.");
   }
