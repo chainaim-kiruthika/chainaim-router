@@ -31,6 +31,7 @@
   .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 800; font-size: 1.15rem; letter-spacing: -.01em; color: var(--ink); text-decoration: none; }
   .brand svg { width: 34px; height: 34px; flex: none; }
   .wallets { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+  .chip .connect { font-weight: 600; }
   .chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); box-shadow: 0 2px 8px rgba(40, 50, 120, .06); font-size: .85rem; }
   .chip .lab { color: var(--muted); font-weight: 600; }
   .chip .addr { font: .82rem ui-monospace, Consolas, monospace; }
@@ -149,6 +150,7 @@
 
 <script type="module">
 import { maskText, restore } from "/client-mask.js";
+import { savedAccount, connect, disconnect, balance, payAndAsk } from "/wallet.js";
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); for (const k of kids) e.append(k); return e; };
@@ -163,7 +165,9 @@ const KIND = {
   IN_BANK_ACCOUNT: ["bank account number", "bank account numbers"], MEDICAL_RECORD: ["medical record number", "medical record numbers"], CREDIT_CARD: ["card number", "card numbers"],
 };
 
-let wallets = null;
+let wallets = null; // from /api/wallets: network, genesisId, algodUrl, asset, payTo, prices
+let buyer = null;   // { address, usdc, algo, optedIn } once Lute is connected
+const net = () => (wallets?.genesisId ? { name: wallets.network, genesisId: wallets.genesisId, algodUrl: wallets.algodUrl, asset: wallets.asset } : null);
 let current = null; // { masked, map } for the message on screen
 
 /* ---------- wallets, top right ---------- */
@@ -186,19 +190,57 @@ function chip(label, address, extra) {
   return c;
 }
 
+function buyerChip() {
+  if (!buyer) {
+    const b = el("button", { type: "button", className: "connect", textContent: "Connect Lute", title: "Pay from your own Lute wallet" });
+    b.onclick = () => doConnect().catch((e) => showError(e.message));
+    return el("div", { className: "chip" }, el("span", { className: "lab", textContent: "Buyer" }), b);
+  }
+  let bal;
+  if (buyer.usdc !== null) bal = el("span", { className: "bal" + (buyer.usdc <= 0 ? " low" : ""), textContent: `${buyer.usdc} USDC` });
+  const c = chip("Buyer", buyer.address, bal);
+  const off = el("button", { type: "button", textContent: "Disconnect", title: "Forget this Lute account on this page" });
+  off.onclick = () => { disconnect(); buyer = null; renderWallets(); };
+  c.append(off);
+  return c;
+}
+
 function renderWallets() {
   const box = $("wallets");
   box.replaceChildren();
   if (!wallets) return;
-  let bal;
-  if (wallets.buyer && wallets.buyer.usdc !== null) bal = el("span", { className: "bal" + (wallets.buyer.usdc <= 0 ? " low" : ""), textContent: `${wallets.buyer.usdc} USDC` });
-  box.append(chip("Buyer", wallets.buyer?.address, bal), chip("Pay to", wallets.payTo?.address));
+  box.append(buyerChip(), chip("Pay to", wallets.payTo?.address));
   const price = wallets.prices?.chat;
   $("execBtn").textContent = price ? `Execute · $${price}` : "Execute";
 }
 
+async function refreshBuyer() {
+  const n = net();
+  const saved = savedAccount();
+  if (!n || !saved) { buyer = null; return; }
+  if (saved.genesisId !== n.genesisId) {
+    disconnect();
+    buyer = null;
+    showError(`Your Lute account was connected for ${saved.genesisId}, and this page now pays on ${n.genesisId}. Connect again.`);
+    return;
+  }
+  const b = { address: saved.address, usdc: null, algo: null, optedIn: null };
+  try { Object.assign(b, await balance(saved.address, n)); } catch { /* the node is down: the paywall decides */ }
+  buyer = b;
+}
+
 async function loadWallets() {
   try { wallets = await (await fetch("/api/wallets")).json(); } catch { wallets = null; }
+  await refreshBuyer();
+  renderWallets();
+}
+
+async function doConnect() {
+  const n = net();
+  if (!n) throw new Error("The payment service is not answering, so the network is not known yet. Try again in a moment.");
+  clearStatus();
+  await connect(n.genesisId);
+  await refreshBuyer();
   renderWallets();
 }
 
@@ -272,6 +314,7 @@ function showBusy(text) { $("status").replaceChildren(el("div", { className: "bu
 function showError(message, status) {
   const box = el("div", { className: "error", role: "alert" }, message);
   if (status === 402 || /USDC/.test(message)) box.append(" ", el("a", { href: "https://faucet.circle.com", target: "_blank", rel: "noopener", textContent: "Get TestNet USDC" }));
+  if (/Lute could not open/.test(message)) box.append(" ", el("a", { href: "https://lute.app", target: "_blank", rel: "noopener", textContent: "Get Lute" }));
   $("status").replaceChildren(box);
 }
 
@@ -300,15 +343,19 @@ function doMask() {
 async function doExecute() {
   if (!current) return;
   $("execBtn").disabled = true;
-  showBusy("Paying with USDC and asking the model…");
   try {
-    const r = await fetch("/api/execute", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ masked: current.masked }) });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) { showError(j.error?.message ?? `Something went wrong (HTTP ${r.status}).`, r.status); return; }
+    if (!buyer) { showBusy("Connect your Lute wallet…"); await doConnect(); }
+    if (!buyer) return; // refreshBuyer already showed why
+    const price = wallets?.prices?.chat;
+    if (buyer.optedIn === false) { showError(`This wallet has not opted in to USDC (asset ${wallets.asset}) yet. Opt in from Lute first. Nothing was sent.`, 402); return; }
+    if (price && buyer.usdc !== null && buyer.usdc < price) { showError(`Your wallet has ${buyer.usdc} USDC and this answer costs ${price}. Fund it with TestNet USDC and try again. Nothing was sent.`, 402); return; }
+    showBusy("Approve the payment in Lute…");
+    const a = await payAndAsk(buyer.address, net(), current.masked);
+    if (a.error) { showError(a.error, a.status); return; }
     clearStatus();
-    showAnswer(j);
-  } catch {
-    showError("Could not reach PrivacyBuddy's server. Is it running?");
+    showAnswer(a);
+  } catch (e) {
+    showError(e?.message || "Something went wrong.");
   } finally {
     $("execBtn").disabled = false;
     loadWallets();
