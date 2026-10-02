@@ -28,6 +28,34 @@ const PASS_BACK = /^(content-type|retry-after|x-chainaim-[a-z-]+)$/;
 
 export type PaywallDeps = { log?: (line: string) => void; now?: () => number; maxReplayEntries?: number };
 
+const SITE_NAME = "PrivacyBuddy";
+const SITE_DESCRIPTION = "Private AI chat. Sensitive details are masked before any model sees them, and every answer is paid per call in USDC on Algorand with x402.";
+
+/**
+ * The root page. The facilitator's Bazaar names a merchant from the HTML at the
+ * root of its domain (og:site_name, then og:title, then the title), so this
+ * page is what the leaderboard shows. No og:image: no logo was chosen.
+ */
+const ROOT_PAGE = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${SITE_NAME}</title>
+<meta name="description" content="${SITE_DESCRIPTION}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="${SITE_NAME}">
+<meta property="og:title" content="${SITE_NAME}">
+<meta property="og:description" content="${SITE_DESCRIPTION}">
+</head>
+<body style="font-family: system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem">
+<h1>${SITE_NAME}</h1>
+<p>${SITE_DESCRIPTION}</p>
+<p>This address is the paywall API. <a href="https://chainaim-router.vercel.app">Try it in the browser</a> · <a href="https://github.com/chainaimdev/chainaim-router">Source code</a></p>
+</body>
+</html>
+`;
+
 function errorBody(c: Context, status: 404 | 413 | 502 | 503, message: string, headers: Record<string, string> = {}): Response {
   return c.json({ error: { message, type: status >= 500 ? "gateway_error" : "invalid_request_error", code: status } }, status, headers);
 }
@@ -109,6 +137,7 @@ export function createPaywall(config: PaywallConfig, deps: PaywallDeps = {}): Ho
   app.use(paymentMiddleware(routesConfig(config), server));
 
   for (const route of PAID_ROUTES) app.post(route.path, proxy);
+  app.get("/", (c) => c.html(ROOT_PAGE));
   app.get("/v1/models", proxy);
   app.get("/healthz", proxy);
   app.notFound((c) => errorBody(c, 404, `no route for ${c.req.method} ${c.req.path}`));

@@ -154,6 +154,23 @@ describe("paywall (TestNet)", () => {
     assert.equal(facilitator.calls.length, 0);
   });
 
+  it("serves a public root page that names the project for the Bazaar, with no payment and no gateway call", async () => {
+    const gatewayCalls = gateway.seen.length;
+    const r = await fetch(`${paywall.url}/`, { headers: { accept: "text/html" } });
+    assert.equal(r.status, 200);
+    assert.match(r.headers.get("content-type") ?? "", /^text\/html/);
+    assert.equal(r.headers.get("payment-required"), null);
+    const html = await r.text();
+    assert.match(html, /<title>PrivacyBuddy<\/title>/);
+    assert.match(html, /<meta property="og:site_name" content="PrivacyBuddy">/);
+    assert.match(html, /<meta property="og:title" content="PrivacyBuddy">/);
+    assert.match(html, /<meta name="description" content="[^"]+">/);
+    assert.match(html, /<meta property="og:description" content="[^"]+">/);
+    assert.doesNotMatch(html, /og:image/, "no logo was chosen");
+    assert.equal(gateway.seen.length, gatewayCalls);
+    assert.equal(facilitator.calls.length, 0);
+  });
+
   it("rejects bodies over 4 MiB with 413 before any payment step", async () => {
     const r = await post("/v1/privacy/scan", { text: "x".repeat(4_200_000) });
     assert.equal(r.status, 413);
