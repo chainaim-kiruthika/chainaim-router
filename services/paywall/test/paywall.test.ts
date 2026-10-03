@@ -167,6 +167,10 @@ describe("paywall (TestNet)", () => {
     assert.match(html, /<meta name="description" content="[^"]+">/);
     assert.match(html, /<meta property="og:description" content="[^"]+">/);
     assert.doesNotMatch(html, /og:image/, "no logo was chosen");
+    assert.match(html, /<h1>PrivacyBuddy™<\/h1>/, "the trademark sign is in the visible heading");
+    assert.match(html, /© 2026 ChainAim\. PrivacyBuddy™ is a trademark of ChainAim\. All rights reserved\./);
+    assert.match(html, /href="https:\/\/github\.com\/chainaimdev\/chainaim-router\/blob\/main\/LICENSE"/);
+    assert.doesNotMatch(html, /<title>[^<]*™|og:[a-z_]+" content="[^"]*™/, "the Bazaar reads the plain name from the title and og tags");
     assert.equal(gateway.seen.length, gatewayCalls);
     assert.equal(facilitator.calls.length, 0);
   });

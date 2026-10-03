@@ -29,12 +29,15 @@ const PASS_BACK = /^(content-type|retry-after|x-chainaim-[a-z-]+)$/;
 export type PaywallDeps = { log?: (line: string) => void; now?: () => number; maxReplayEntries?: number };
 
 const SITE_NAME = "PrivacyBuddy";
+const OWNER = "ChainAim";
 const SITE_DESCRIPTION = "Private AI chat. Sensitive details are masked before any model sees them, and every answer is paid per call in USDC on Algorand with x402.";
 
 /**
  * The root page. The facilitator's Bazaar names a merchant from the HTML at the
  * root of its domain (og:site_name, then og:title, then the title), so this
- * page is what the leaderboard shows. No og:image: no logo was chosen.
+ * page is what the leaderboard shows. No og:image: no logo was chosen. The
+ * trademark sign goes only in the visible body: the title and og tags stay the
+ * plain name, so the listing is not renamed.
  */
 const ROOT_PAGE = `<!doctype html>
 <html lang="en">
@@ -49,9 +52,10 @@ const ROOT_PAGE = `<!doctype html>
 <meta property="og:description" content="${SITE_DESCRIPTION}">
 </head>
 <body style="font-family: system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem">
-<h1>${SITE_NAME}</h1>
+<h1>${SITE_NAME}™</h1>
 <p>${SITE_DESCRIPTION}</p>
 <p>This address is the paywall API. <a href="https://chainaim-router.vercel.app">Try it in the browser</a> · <a href="https://github.com/chainaimdev/chainaim-router">Source code</a></p>
+<p style="font-size: clamp(.78rem, 2.4vw, .85rem); opacity: .7">© 2026 ${OWNER}. ${SITE_NAME}™ is a trademark of ${OWNER}. All rights reserved. Source-available, not open source: <a href="https://github.com/chainaimdev/chainaim-router/blob/main/LICENSE">License</a></p>
 </body>
 </html>
 `;
