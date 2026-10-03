@@ -6,6 +6,7 @@ import { browserMaskModule } from "../src/mask.ts";
 const TESTNET = "algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=";
 const PAYTO = "EA7WASZQYXGGRSMGYQLRI6TR2PQCVDC42QULUT5N62UMYO4A6ADCJ6464M";
 const PAGE = new URL("../public/index.html", import.meta.url);
+const COOKIES = new URL("../public/cookies.html", import.meta.url);
 const WALLET = new URL("../public/wallet.js", import.meta.url);
 
 const quoteHeader = (amount = "10000") =>
@@ -28,6 +29,7 @@ function makeApp(over: Partial<Parameters<typeof createWebApp>[0]> = {}) {
     paywallUrl: "http://paywall.test",
     maskModule: browserMaskModule(),
     pageFile: PAGE,
+    cookiesFile: COOKIES,
     walletFile: WALLET,
     fetcher: fakeFetch(),
     ...over,
@@ -45,6 +47,15 @@ describe("page and static routes", () => {
     assert.match(csp, /connect-src 'self' https:\/\/testnet-api\.algonode\.cloud https:\/\/mainnet-api\.algonode\.cloud;/);
     assert.equal(r.headers.get("x-content-type-options"), "nosniff");
     assert.match(await r.text(), /PrivacyBuddy/);
+  });
+
+  it("serves the cookie policy with security headers and no cookie of its own", async () => {
+    const r = await makeApp().request("/cookies.html");
+    assert.equal(r.status, 200);
+    assert.match(r.headers.get("content-type") ?? "", /text\/html/);
+    assert.match(r.headers.get("content-security-policy") ?? "", /default-src 'self'/);
+    assert.equal(r.headers.get("set-cookie"), null);
+    assert.match(await r.text(), /sets no cookies/);
   });
 
   it("answers /healthz", async () => {

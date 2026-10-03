@@ -20,6 +20,7 @@ const app = createWebApp({
   paywallUrl: config.paywallUrl,
   maskModule: browserMaskModule(),
   pageFile: new URL("../public/index.html", import.meta.url),
+  cookiesFile: new URL("../public/cookies.html", import.meta.url),
   walletFile: new URL("../public/wallet.js", import.meta.url),
   log: (line) => console.log(JSON.stringify({ ts: new Date().toISOString(), ...line })),
 });

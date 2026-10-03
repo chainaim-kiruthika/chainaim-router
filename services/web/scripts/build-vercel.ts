@@ -1,7 +1,7 @@
 /**
  * Builds PrivacyBuddy for Vercel in its Build Output API format
  * (.vercel/output), which Vercel deploys as it is: the page, wallet.js and
- * client-mask.js as static files, and /api/wallets and /api/chat as Node
+ * client-mask.js and the cookie policy as static files, and /api/wallets and /api/chat as Node
  * functions running src/vercel-api.ts. vercel.json runs this as the build
  * command. Run locally: npm run build:vercel
  */
@@ -22,6 +22,7 @@ export async function buildVercel(outDir: URL = new URL(".vercel/output/", root)
   const staticDir = new URL("static/", outDir);
   mkdirSync(staticDir, { recursive: true });
   copyFileSync(new URL("public/index.html", root), new URL("index.html", staticDir));
+  copyFileSync(new URL("public/cookies.html", root), new URL("cookies.html", staticDir));
   copyFileSync(new URL("public/wallet.js", root), new URL("wallet.js", staticDir));
   writeFileSync(new URL("client-mask.js", staticDir), browserMaskModule());
 

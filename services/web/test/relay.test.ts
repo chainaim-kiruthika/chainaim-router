@@ -5,6 +5,7 @@ import { browserMaskModule } from "../src/mask.ts";
 import { checkChat, MAX_MASKED_CHARS } from "../src/relay.ts";
 
 const PAGE = new URL("../public/index.html", import.meta.url);
+const COOKIES = new URL("../public/cookies.html", import.meta.url);
 const WALLET = new URL("../public/wallet.js", import.meta.url);
 
 type Seen = { url: string; headers: Headers; body: any };
@@ -26,6 +27,7 @@ function makeApp(fetcher: typeof fetch) {
     paywallUrl: "http://paywall.test",
     maskModule: browserMaskModule(),
     pageFile: PAGE,
+    cookiesFile: COOKIES,
     walletFile: WALLET,
     fetcher,
     log: (line) => logs.push(line),

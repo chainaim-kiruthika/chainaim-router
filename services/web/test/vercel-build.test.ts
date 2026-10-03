@@ -50,8 +50,9 @@ describe("buildVercel", () => {
     rmSync(out, { recursive: true, force: true });
   });
 
-  it("puts the page, the wallet bundle and the masking module in static/", () => {
+  it("puts the page, the cookie policy, the wallet bundle and the masking module in static/", () => {
     assert.match(readFileSync(join(out, "static/index.html"), "utf8"), /PrivacyBuddy/);
+    assert.match(readFileSync(join(out, "static/cookies.html"), "utf8"), /Cookie policy/);
     assert.match(readFileSync(join(out, "static/wallet.js"), "utf8"), /PrivacyBuddy wallet bundle/);
     assert.match(readFileSync(join(out, "static/client-mask.js"), "utf8"), /export function maskText/);
   });

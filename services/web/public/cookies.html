@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cookie policy · PrivacyBuddy</title>
+<meta name="description" content="PrivacyBuddy sets no cookies and uses no analytics. This page lists the one item it keeps in your browser and the other data the site touches.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M16 6l8 3v6c0 5-3.4 8.6-8 11-4.6-2.4-8-6-8-11V9z' fill='white'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f5f6fb; --bg2: #e6eafd; --card: #ffffff; --ink: #15182b; --muted: #5b6178; --line: #e1e4f0;
+    --brand: #4f46e5; --brand2: #06b6d4; --ok: #15803d; --code: #f1f3fb;
+    --shadow: 0 12px 32px rgba(40, 50, 120, .12);
+  }
+  @media (prefers-color-scheme: dark) { :root {
+    --bg: #0b0d1a; --bg2: #141846; --card: #151931; --ink: #eef0ff; --muted: #a4abc7; --line: #262b4d;
+    --brand: #8b8cff; --brand2: #22d3ee; --ok: #4ade80; --code: #1b2040;
+    --shadow: 0 12px 32px rgba(0, 0, 0, .4);
+  } }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; color: var(--ink); font: clamp(1rem, 2.6vw, 1.05rem)/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: radial-gradient(1100px 520px at 88% -8%, var(--bg2), transparent 62%), var(--bg); }
+  a { color: var(--brand); }
+  :focus-visible { outline: 3px solid var(--brand2); outline-offset: 2px; }
+  header, main, footer { max-width: 760px; margin: 0 auto; padding-left: 20px; padding-right: 20px; }
+  header { padding-top: 18px; padding-bottom: 8px; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 800; font-size: clamp(1.05rem, 3vw, 1.15rem); color: var(--ink); text-decoration: none; }
+  .brand svg { width: 34px; height: 34px; flex: none; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: clamp(18px, 4vw, 30px); box-shadow: var(--shadow); margin: 14px 0 28px; }
+  h1 { margin: 0 0 4px; font-size: clamp(1.7rem, 5vw, 2.3rem); letter-spacing: -.02em; line-height: 1.15; }
+  h2 { margin: 1.6em 0 .4em; font-size: clamp(1.05rem, 3vw, 1.2rem); }
+  p, ul { margin: 0 0 .8em; }
+  ul { padding-left: 1.3em; }
+  li { margin-bottom: .35em; }
+  .updated { color: var(--muted); font-size: clamp(.82rem, 2.4vw, .9rem); margin-bottom: 1.2em; }
+  .answer { padding: 12px 16px; border: 1px solid var(--ok); border-radius: 14px; color: var(--ok); font-weight: 600; }
+  code { background: var(--code); padding: 1px 6px; border-radius: 6px; font: clamp(.82rem, 2.4vw, .9rem) ui-monospace, Consolas, monospace; }
+  footer { padding-bottom: 36px; color: var(--muted); font-size: clamp(.78rem, 2.4vw, .85rem); text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <a class="brand" href="/" aria-label="PrivacyBuddy home">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f46e5"/><stop offset="1" stop-color="#06b6d4"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#g)"/><path d="M16 6l8 3v6c0 5-3.4 8.6-8 11-4.6-2.4-8-6-8-11V9z" fill="#fff"/><path d="M12.5 15.5l2.6 2.6 4.6-5" fill="none" stroke="#4f46e5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span>PrivacyBuddy</span>
+  </a>
+</header>
+
+<main>
+  <article class="card">
+    <h1>Cookie policy</h1>
+    <p class="updated">Last updated 3 October 2026</p>
+
+    <p class="answer">PrivacyBuddy sets no cookies. It uses no analytics, advertising, tracking pixels or third-party scripts, so there is no cookie banner to accept.</p>
+
+    <h2>What it keeps in your browser</h2>
+    <p>One item, in your browser's local storage, under the name <code>privacybuddy.lute</code>. It holds your Algorand account address and the network it belongs to (<code>testnet-v1.0</code> or <code>mainnet-v1.0</code>). The page saves it when you click <strong>Connect Lute</strong>, so it can show your account when you come back. It is removed when you click <strong>Disconnect</strong> or clear this site's data. Your wallet keys are never stored by this page: Lute holds them.</p>
+    <p>What you type, the masked version, and the answer live only in the page while it is open. They are not saved in your browser.</p>
+
+    <h2>Other data the site touches</h2>
+    <ul>
+      <li><strong>Balance lookups.</strong> Your browser asks a public Algorand node run by Algonode (<code>algonode.cloud</code>) for your account balance, using your address. Algonode's own terms apply.</li>
+      <li><strong>Lute.</strong> Lute is a separate wallet. If it opens as a pop-up from <code>lute.app</code>, that site has its own storage and policies.</li>
+      <li><strong>Payments.</strong> Payments are USDC transfers on the Algorand blockchain. They are public and cannot be undone.</li>
+      <li><strong>Your message.</strong> Sensitive details are masked on your device first. The masked text is sent to ChainAim's server, scanned again, and then passed to AI model providers. See the disclaimer on the <a href="/">main page</a>.</li>
+      <li><strong>Our logs.</strong> The web app's own log lines record only the route, the status code, whether a payment was attached, sizes and timing. They never hold your text, the placeholders, the restore map or the payment.</li>
+      <li><strong>Hosting.</strong> The page is served by Vercel and the paywall runs on Railway. Hosting providers keep ordinary request logs, such as IP address and time, under their own policies.</li>
+    </ul>
+
+    <h2>If this changes</h2>
+    <p>If PrivacyBuddy ever adds cookies or analytics, this page will be updated first, and we will ask for your consent where the law requires it.</p>
+
+    <h2>Questions</h2>
+    <p>Open an issue at <a href="https://github.com/chainaimdev/chainaim-router/issues" target="_blank" rel="noopener">github.com/chainaimdev/chainaim-router</a>. <a href="/">Back to PrivacyBuddy</a>.</p>
+  </article>
+</main>
+
+<footer>
+  <p>© 2026 ChainAim. PrivacyBuddy™ is a trademark of ChainAim. All rights reserved.</p>
+</footer>
+</body>
+</html>

@@ -24,6 +24,7 @@ function createFetch(): (request: Request) => Response | Promise<Response> {
     // Served as static files on Vercel, never by this function.
     maskModule: "",
     pageFile: new URL("../public/index.html", import.meta.url),
+    cookiesFile: new URL("../public/cookies.html", import.meta.url),
     walletFile: new URL("../public/wallet.js", import.meta.url),
     log: (line) => console.log(JSON.stringify({ ts: new Date().toISOString(), ...line })),
   });

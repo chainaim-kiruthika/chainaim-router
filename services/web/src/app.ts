@@ -30,6 +30,8 @@ export type Deps = {
   maskModule: string;
   /** The page, read on every request so an edit shows without a restart. */
   pageFile: URL;
+  /** The cookie policy page, public/cookies.html. */
+  cookiesFile: URL;
   /** public/wallet.js: the Lute and x402 browser bundle (npm run build:wallet). */
   walletFile: URL;
   fetcher?: typeof fetch;
@@ -70,6 +72,7 @@ export function createWebApp(deps: Deps): Hono {
   });
 
   app.get("/", async (c) => c.html(await readFile(deps.pageFile, "utf8")));
+  app.get("/cookies.html", async (c) => c.html(await readFile(deps.cookiesFile, "utf8")));
   app.get("/healthz", (c) => c.json({ status: "ok" }));
   app.get("/client-mask.js", (c) => c.body(deps.maskModule, 200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" }));
   app.get("/wallet.js", async (c) => {

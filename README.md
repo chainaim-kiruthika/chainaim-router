@@ -1,5 +1,7 @@
 # chainaim-router
 
+> 🔒 **Project status:** PrivacyBuddy™ is a proprietary submission to the Global x402 Challenge. The source is public so it can be read and judged. It is **not open source**: all rights are reserved except as the [LICENSE](LICENSE) allows.
+
 ChainAim's privacy gateway for AI agents. Agents pay per call in USDC on Algorand (x402) for three services: find personal, health and card data in text (**scan**), replace it with placeholders they can restore (**mask**), and an OpenAI-compatible **private chat** that masks the conversation before any model sees it.
 
 ```
@@ -12,7 +14,7 @@ Setup on your machine: `SETUP.md`. Design: `docs/superpowers/specs/2026-09-24-pr
 
 ## Demo video
 
-[![Watch the PrivacyBuddy by ChainAIm demo video (about 1:45)](docs/demo-video-thumbnail.jpg)](https://drive.google.com/file/d/1Tquz5qy8m2Yho9Ju04sZX0T39bS4ulJa/view?usp=drive_link)
+[![Watch the PrivacyBuddy demo video (about 1:45)](docs/demo-video-thumbnail.jpg)](https://drive.google.com/file/d/1Tquz5qy8m2Yho9Ju04sZX0T39bS4ulJa/view?usp=drive_link)
 
 A support agent masks a customer message in the browser, pays one cent per answer over x402, and gets the reply with the real details restored. Click the picture to watch it on Google Drive.
 
@@ -81,3 +83,11 @@ npm run test:engine    # the forked route engine (needs its dev dependencies)
 ## Privacy rules in short
 
 Presidio runs on the private network, and message text and tool-call arguments leave only after they are masked; if Presidio is down, scan, mask and chat (and the private `/v1/route/explain`) answer 503 and `/healthz` reports 503, while the model list, capacity and deployment routes don't depend on Presidio. The decision ledger never holds text, placeholders or the map. Payment headers are stripped before the gateway, so it never learns who paid. Only allowlisted request fields reach a model, so a client can't override the data policy. Chat scans message text and tool-call arguments (keys and values); tool definitions, the `response_format` schema, stop sequences, `tool_choice`, and tool-call ids and function names are forwarded as sent without scanning, so don't put personal data in them.
+
+## License and trademark
+
+Copyright (c) 2026 ChainAim. PrivacyBuddy™ and ChainAim are unregistered trademarks of ChainAim. All rights reserved.
+
+This repository is public for the Global x402 Challenge and is **not open source**. The code is under the [PolyForm Strict License 1.0.0](https://polyformproject.org/licenses/strict/1.0.0) with ChainAim terms added: see [LICENSE](LICENSE). In short, you may read the code and run it on your own computer to evaluate it. You may not copy it into other work, change or redistribute it, use it commercially, or run it as a service for other people without ChainAim's written permission. No license is granted to the PrivacyBuddy or ChainAim names or logos. `packages/route-engine/` is a fork under the MIT License and keeps its own `LICENSE`.
+
+The website's cookie policy is `services/web/public/cookies.html`.
